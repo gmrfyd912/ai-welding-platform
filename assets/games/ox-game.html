@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, minimum-scale=0.1, user-scalable=yes">
+    <title>Cobot Welding Defense - V15.0 (Ultimate Difficulty & New Defect)</title>
+    <style>
+        html, body { margin: 0; padding: 0; }
+        body { font-family: 'Malgun Gothic', sans-serif; background-color: #0b1319; color: white; user-select: none; }
+        
+        #viewport-container { position: relative; }
+        #scroll-area { position: relative; width: 1140px; height: 780px; transition: width 0.2s, height 0.2s; }
+        
+        #game-wrapper { position: absolute; top: 50px; left: 50px; width: 1040px; height: 680px; background-color: #1a252c; border: 4px solid #34495e; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.8); transform-origin: 0 0; transition: transform 0.2s ease-out; }
+        canvas { display: block; cursor: crosshair; background: linear-gradient(135deg, #1e2a35 0%, #111a22 100%); }
+        canvas { background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px); background-size: 30px 30px; }
+
+        /* 드래그 가능한 줌 컨트롤 UI */
+        #zoom-controls { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 1000; background: rgba(30, 42, 53, 0.7); padding: 10px; border-radius: 35px; border: 2px solid #7f8c8d; cursor: move; touch-action: none; }
+        .zoom-btn { width: 50px; height: 50px; border-radius: 50%; background: rgba(44, 62, 80, 0.9); color: #f1c40f; font-size: 24px; font-weight: bold; border: 2px solid #3498db; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; pointer-events: auto; }
+        .zoom-btn:active { background: #3498db; color: white; transform: scale(0.9); }
+        .zoom-btn span { font-size: 12px; margin-top: -2px; }
+
+        #top-ui { position: absolute; top: 0; left: 0; width: 100%; background: linear-gradient(to bottom, rgba(0,0,0,0.95), rgba(0,0,0,0.7)); padding: 10px 20px; box-sizing: border-box; display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; border-bottom: 2px solid #2c3e50; z-index: 5; align-items: center; }
+        .stat-group { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
+        
+        .hp-text { color: #e74c3c; font-size: 15px; }
+        .regen-bg { width: 100%; height: 6px; background: #333; border-radius: 3px; overflow: hidden; position: relative; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }
+        .regen-fill { height: 100%; background: #e67e22; width: 0%; transition: width 0.1s linear; }
+        
+        .wave-text { color: #3498db; font-size: 15px; }
+        .timer-text { color: #f39c12; font-size: 18px; text-shadow: 0 0 5px rgba(243,156,18,0.5); }
+        
+        .resource-text { color: #f1c40f; font-size: 15px; }
+        .quiz-stats { color: #2ecc71; font-size: 12px; }
+
+        .controls { display: flex; gap: 8px; }
+        .ctrl-btn { padding: 8px 12px; font-size: 13px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; color: white; transition: 0.2s; }
+        .ctrl-btn:hover { filter: brightness(1.2); }
+        .btn-speed { background: #8e44ad; }
+        .btn-play { background: #27ae60; }
+        .btn-pause { background: #f39c12; }
+        .btn-quit { background: #c0392b; }
+
+        #bottom-ui { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.8); padding: 8px; text-align: center; font-size: 13px; color: #bdc3c7; z-index: 5; pointer-events: none; border-top: 2px solid #2c3e50; }
+
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 30; flex-direction: column; justify-content: center; align-items: center; }
+        
+        #quiz-overlay { display: none; background: rgba(0,0,0,0.95); backdrop-filter: blur(5px); }
+        .quiz-box { background: #1e2a35; padding: 30px; border-radius: 10px; text-align: center; width: 80%; max-width: 800px; border: 2px solid #3498db; box-shadow: 0 0 30px rgba(52, 152, 219, 0.4); }
+        .quiz-category { color: #f1c40f; font-size: 14px; font-weight: bold; margin-bottom: 10px; border: 1px solid #f1c40f; display: inline-block; padding: 3px 10px; border-radius: 15px; }
+        #quiz-exp { display: none; margin-top: 15px; font-size: 14px; font-weight: bold; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 5px; line-height: 1.5; text-align: left; }
+        
+        .btn { padding: 12px 40px; margin: 15px; font-size: 20px; font-weight: bold; cursor: pointer; border: none; border-radius: 5px; transition: all 0.2s; color:white; }
+        .btn:active { transform: scale(0.95); }
+        .btn-o { background-color: #2ecc71; }
+        .btn-x { background-color: #e74c3c; }
+
+        #intro-overlay { display: flex; background: rgba(11, 19, 25, 0.95); z-index: 50; padding: 40px; box-sizing: border-box; text-align:center; }
+        #intro-overlay h1 { font-size: 36px; color: #f1c40f; margin-top: 0; text-shadow: 2px 2px 5px black; letter-spacing: 2px; }
+        .intro-content { display: flex; gap: 30px; width: 90%; margin-bottom: 30px; text-align: left; }
+        .intro-box { flex: 1; background: rgba(44, 62, 80, 0.8); padding: 25px; border-radius: 10px; border: 2px solid #34495e; }
+        .intro-box h3 { color: #3498db; margin-top: 0; border-bottom: 1px solid #34495e; padding-bottom: 10px; }
+        .intro-box p { color: #ecf0f1; font-size: 15px; line-height: 1.6; }
+        .intro-box ul { color: #bdc3c7; font-size: 14px; line-height: 1.8; padding-left: 20px; margin-bottom: 0; }
+        .intro-box li strong { color: #e67e22; }
+
+        #gameover-overlay { display: none; background: rgba(0, 0, 0, 0.6); z-index: 45; }
+        .gameover-box { background: rgba(30, 42, 53, 0.95); padding: 40px 60px; border-radius: 15px; text-align: center; border: 3px solid #e74c3c; box-shadow: 0 0 50px rgba(231, 76, 60, 0.6); animation: popIn 0.5s ease-out forwards; }
+        .gameover-box h2 { color: #e74c3c; font-size: 40px; margin: 0 0 10px 0; letter-spacing: 3px; text-shadow: 0 0 10px rgba(231, 76, 60, 0.5); }
+        .gameover-box h3 { color: #bdc3c7; margin: 0 0 20px 0; font-weight: normal; }
+        .stats-grid { display: grid; grid-template-columns: 1fr; gap: 15px; background: rgba(0,0,0,0.5); padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: left; }
+        .stats-item { font-size: 16px; color: #ecf0f1; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        .stats-item span { color: #f1c40f; font-weight: bold; font-size: 20px; float: right; }
+        @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+        .popup-menu { display: none; position: absolute; background: rgba(30, 42, 53, 0.95); border-radius: 8px; padding: 10px; z-index: 10; flex-direction: column; gap: 5px; width: 250px; box-shadow: 0 5px 20px rgba(0,0,0,0.6); }
+        #build-menu { border: 2px solid #3498db; }
+        #upgrade-menu { border: 2px solid #f1c40f; }
+        #base-menu { border: 2px solid #e74c3c; }
+
+        .upg-title { font-size: 14px; font-weight: bold; text-align: center; margin-bottom: 5px; border-bottom: 1px solid #7f8c8d; padding-bottom: 5px; }
+        .upg-btn { padding: 8px; font-size: 12px; font-weight: bold; cursor: pointer; background: #2c3e50; color: white; border: 1px solid #7f8c8d; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;}
+        .upg-btn:hover:not(:disabled) { filter: brightness(1.3); }
+        .upg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .upg-desc { display:block; font-size: 10px; color: #bdc3c7; text-align:left; margin-top:3px;}
+        .close-btn { background: #95a5a6 !important; color: white !important; text-align: center; display: block; margin-top: 5px; justify-content: center; }
+        .sell-btn { background: #c0392b !important; color: white !important; text-align: center; display: flex; margin-top: 5px; justify-content: space-between; }
+        
+        @media (max-width: 800px) {
+            .intro-content { flex-direction: column; }
+            #intro-overlay h1 { font-size: 26px; }
+            .btn { padding: 10px 20px; font-size: 16px; }
+        }
+    
+        /* === Mobile bottom-sheet override for popup menus === */
+        #menu-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 9998;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #menu-backdrop.show { display: block; }
+        .popup-menu {
+            position: fixed !important;
+            left: 50% !important;
+            top: auto !important;
+            bottom: 0 !important;
+            transform: translateX(-50%) !important;
+            width: min(92vw, 420px) !important;
+            max-height: 70vh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            border-radius: 16px 16px 0 0 !important;
+            padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+            box-shadow: 0 -10px 40px rgba(0,0,0,0.7) !important;
+            z-index: 9999 !important;
+        }
+        .popup-menu .close-btn {
+            position: sticky;
+            bottom: 0;
+            margin-top: 6px;
+            padding: 12px;
+            font-size: 16px;
+            background: #c0392b !important;
+            color: #fff !important;
+            font-weight: bold;
+        }
+
+    </style>
+</head>
+<body>
+<div id="menu-backdrop" onclick="closeMenus()"></div>
+
+<div id="viewport-container">
+    <div id="scroll-area">
+        <div id="game-wrapper">
+            <div id="top-ui">
+                <div class="stat-group">
+                    <div class="hp-text">🛡️ 기지 체력: <span id="base-hp">200</span>/200 <span id="bead-hp-ui" style="color:#bdc3c7; font-size:11px;"></span></div>
+                    <div class="regen-bg" title="열처리 추가 시 체력이 자동 회복됩니다."><div id="regen-fill" class="regen-fill"></div></div>
+                </div>
+                
+                <div class="stat-group" style="align-items: center;">
+                    <div class="wave-text">🌊 웨이브: <span id="wave-num">1</span> / 100</div>
+                    <div class="timer-text">⏱ 남은 시간: <span id="wave-timer">30</span>초</div>
+                </div>
+                
+                <div class="stat-group" style="align-items: flex-end;">
+                    <div class="resource-text">⚡ 자원: <span id="resources">300</span></div>
+                    <div class="quiz-stats">📝 퀴즈: <span id="quiz-correct">0</span> / <span id="quiz-total">0</span> 정답</div>
+                </div>
+
+                <div class="controls">
+                    <button class="ctrl-btn btn-speed" id="btn-speed" onclick="toggleSpeed()">▶ 속도 x1</button>
+                    <button class="ctrl-btn btn-play" id="btn-playpause" onclick="togglePause()">일시정지</button>
+                </div>
+            </div>
+            
+            <canvas id="gameCanvas" width="1040" height="680"></canvas>
+            
+            <div id="bottom-ui">왼쪽 벽면 클릭: <b>기지 업그레이드</b> | 빈 공간 클릭: <b>로봇 설치</b> | 로봇 클릭: <b>업그레이드 및 철거</b></div>
+
+            <div id="build-menu" class="popup-menu">
+                <div class="upg-title" style="color: #3498db;">로봇 설치</div>
+                <button class="upg-btn" onclick="buildTower('FCAW')" style="background:#d35400;">
+                    <div>FCAW (사거리 길고, 딜 약함)</div> <span>50⚡</span>
+                </button>
+                <button class="upg-btn" onclick="buildTower('GTAW')" style="background:#8e44ad;">
+                    <div>GTAW (사거리 짧고, 딜 강함)</div> <span>100⚡</span>
+                </button>
+                <button class="upg-btn close-btn" onclick="closeMenus()">취소</button>
+            </div>
+
+            <div id="upgrade-menu" class="popup-menu">
+                <div class="upg-title" id="upg-title" style="color: #f1c40f;">로봇 업그레이드</div>
+                <button class="upg-btn" id="btn-upg-current" onclick="buyUpgrade('current')">
+                    <div>⚡ 전류 <span class="upg-desc">데미지 증가</span></div> <span id="cost-current">40</span>
+                </button>
+                <button class="upg-btn" id="btn-upg-voltage" onclick="buyUpgrade('voltage')">
+                    <div>⚡ 전압 <span class="upg-desc">사거리 증가</span></div> <span id="cost-voltage">40</span>
+                </button>
+                <button class="upg-btn" id="btn-upg-gas" onclick="buyUpgrade('gas')">
+                    <div>💨 보호가스 <span class="upg-desc">플래시 데미지 추가</span></div> <span id="cost-gas">50</span>
+                </button>
+                <button class="upg-btn" id="btn-upg-filler" onclick="buyUpgrade('filler')">
+                    <div>⚙️ 용가재 <span class="upg-desc">적 둔화 증가</span></div> <span id="cost-filler">30</span>
+                </button>
+                <button class="upg-btn sell-btn" onclick="sellTower()">
+                    <div>💣 철거 (50% 환불)</div> <span id="refund-amt">+0⚡</span>
+                </button>
+                <button class="upg-btn close-btn" onclick="closeMenus()">닫기</button>
+            </div>
+
+            <div id="base-menu" class="popup-menu">
+                <div class="upg-title" id="base-title" style="color: #e74c3c;">Welding Zone 업그레이드</div>
+                <button class="upg-btn" id="btn-base-alloy" onclick="buyBaseUpgrade('alloy')">
+                    <div>🛡️ 합금원소 추가 <span class="upg-desc">기지 체력 즉시 회복</span></div> <span id="cost-base-alloy">80</span>
+                </button>
+                <button class="upg-btn" id="btn-base-bead" onclick="buyBaseUpgrade('bead')">
+                    <div>🧱 용접비드 추가 <span class="upg-desc">장애물 방어막 생성</span></div> <span id="cost-base-bead">100</span>
+                </button>
+                <button class="upg-btn" id="btn-base-notch" onclick="buyBaseUpgrade('notch')">
+                    <div>✂️ 노치제거 추가 <span class="upg-desc">피격 데미지 영구 감소</span></div> <span id="cost-base-notch">150</span>
+                </button>
+                <button class="upg-btn" id="btn-base-heat" onclick="buyBaseUpgrade('heat')">
+                    <div>🔥 열처리 추가 <span class="upg-desc">체력 자동 회복 활성화/가속</span></div> <span id="cost-base-heat">120</span>
+                </button>
+                <button class="upg-btn close-btn" onclick="closeMenus()">닫기</button>
+            </div>
+
+            <div id="quiz-overlay" class="overlay">
+                <div class="quiz-box">
+                    <h2 style="color: #3498db; margin-top: 0;">용접 & 협동로봇 이론 퀴즈 ⚠️</h2>
+                    <div id="quiz-cat-ui" class="quiz-category">카테고리</div>
+                    <p id="quiz-text" style="font-size: 20px; margin: 15px 0; line-height: 1.5; color: white;">문제 텍스트</p>
+                    <div id="quiz-buttons">
+                        <button class="btn btn-o" onclick="answerQuiz(true)">O (맞다)</button>
+                        <button class="btn btn-x" onclick="answerQuiz(false)">X (틀리다)</button>
+                    </div>
+                    <div id="quiz-exp">해설 내용</div>
+                    <button class="btn btn-o" id="btn-next-wave" style="display:none; width: 100%; margin: 15px 0 0 0;" onclick="resumeGame()">게임으로 복귀</button>
+                </div>
+            </div>
+
+            <div id="intro-overlay" class="overlay">
+                <h1>Cobot Welding Defense</h1>
+                <div class="intro-content">
+                    <div class="intro-box">
+                        <h3>📜 Story (스토리)</h3>
+                        <p>완벽하게 시공된 <strong>Welding Zone (웰딩존)</strong>을 파괴하기 위해 기공, 크랙은 물론 <strong>로봇에 자폭하는 [용착불량] 결함</strong>까지 무차별적으로 쳐들어오고 있습니다.</p>
+                        <p>당신은 최첨단 <strong>Cobot (협동로봇)</strong>을 지휘하여 이 치명적인 결함들로부터 기지와 로봇을 100 웨이브 동안 지켜내야 합니다.</p>
+                    </div>
+                    <div class="intro-box">
+                        <h3>🎮 How to Play (조작법)</h3>
+                        <ul>
+                            <li><strong>자원 획득:</strong> 웨이브 전/중간의 <strong>OX 퀴즈(2회)</strong>를 맞추거나 적을 제거하세요.</li>
+                            <li><strong>로봇 조작:</strong> 빈 공간 클릭(설치), 로봇 클릭(업그레이드). <strong style="color:#e74c3c;">※ 로봇도 HP가 깎이면 파괴됩니다!</strong></li>
+                            <li><strong>기지 방어:</strong> 왼쪽 웰딩존을 클릭하여 기지를 강화하세요.</li>
+                            <li><strong>신규 몬스터:</strong> 찌그러진 사각형 모양의 [용착불량] 결함은 로봇에 직접 자폭 피해를 입힙니다.</li>
+                        </ul>
+                    </div>
+                </div>
+                <button class="btn btn-play" onclick="startGame()" style="font-size: 26px; padding: 15px 80px;">게임 시작 (Start)</button>
+            </div>
+
+            <div id="gameover-overlay" class="overlay" style="display:none;">
+                <div class="gameover-box">
+                    <h2>SYSTEM FAILURE</h2>
+                    <h3>기지가 완전히 파괴되었습니다.</h3>
+                    <div class="stats-grid">
+                        <div class="stats-item">최종 도달 Wave <span id="go-wave">1</span></div>
+                        <div class="stats-item">퀴즈 정답률 <span id="go-quiz">0/0</span></div>
+                        <div class="stats-item" style="border:none; margin-top:10px; font-size:20px;">🏅 최종 종합 평가 <span id="go-score" style="color:#2ecc71; font-size:26px;">100점</span></div>
+                    </div>
+                    <button class="btn btn-play" onclick="resetGame()" style="width: 100%; margin: 0;">다시하기 (Restart)</button>
+                </div>
+            </div>
+
+        </div> 
+    </div> 
+</div> 
+
+<div id="zoom-controls" style="display:none;"></div>
+
+<script>
+    // === iOS WKWebView 안전: 메뉴를 body 루트로 이동 + 백드롭 헬퍼 ===
+    (function reparentMenus() {
+        const ids = ['build-menu', 'upgrade-menu', 'base-menu'];
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el && el.parentNode !== document.body) {
+                document.body.appendChild(el);
+            }
+        }
+    })();
+    function _showBackdrop() {
+        const bd = document.getElementById('menu-backdrop');
+        if (bd) bd.classList.add('show');
+    }
+    function _hideBackdrop() {
+        const bd = document.getElementById('menu-backdrop');
+        if (bd) bd.classList.remove('show');
+    }
+
+    // 줌 컨트롤 UI 드래그 앤 드롭 로직 (PC & Mobile)
+    const zoomControls = document.getElementById('zoom-controls');
+    let isDragging = false; let dragOffsetX = 0, dragOffsetY = 0;
+
+    function startDrag(e) {
+        isDragging = true;
+        let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        const rect = zoomControls.getBoundingClientRect();
+        dragOffsetX = clientX - rect.left; dragOffsetY = clientY - rect.top;
+        zoomControls.style.right = 'auto'; zoomControls.style.bottom = 'auto'; 
+    }
+    function doDrag(e) {
+        if (!isDragging) return;
+        e.preventDefault(); 
+        let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        let newX = clientX - dragOffsetX; let newY = clientY - dragOffsetY;
+        newX = Math.max(0, Math.min(window.innerWidth - zoomControls.offsetWidth, newX));
+        newY = Math.max(0, Math.min(window.innerHeight - zoomControls.offsetHeight, newY));
+        zoomControls.style.left = newX + 'px'; zoomControls.style.top = newY + 'px';
+    }
+    function endDrag() { isDragging = false; }
+    zoomControls.addEventListener('mousedown', startDrag); window.addEventListener('mousemove', doDrag); window.addEventListener('mouseup', endDrag);
+    zoomControls.addEventListener('touchstart', startDrag, {passive: false}); window.addEventListener('touchmove', doDrag, {passive: false}); window.addEventListener('touchend', endDrag);
+
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let currentScale = 1.0;
+    const MIN_SCALE = 0.2; 
+    const MAX_SCALE = 1.5;
+
+    function applyZoom() {
+        const wrapper = document.getElementById('game-wrapper');
+        const scrollArea = document.getElementById('scroll-area');
+        wrapper.style.transform = `scale(${currentScale})`;
+        scrollArea.style.width = (1040 * currentScale + 100) + 'px';
+        scrollArea.style.height = (680 * currentScale + 100) + 'px';
+    }
+    function zoomIn() { if(currentScale < MAX_SCALE) { currentScale += 0.1; applyZoom(); } }
+    function zoomOut() { if(currentScale > MIN_SCALE) { currentScale -= 0.1; applyZoom(); } }
+    function resetZoom() { currentScale = 1.0; applyZoom(); }
+    window.onload = function() { if(window.innerWidth < 1100) { currentScale = Math.max(MIN_SCALE, window.innerWidth / 1140); applyZoom(); } };
+
+    // 게임 전역 상태
+    let gameState = {};
+    let towers = []; let enemies = []; let projectiles = []; let particles = []; 
+    let baseCracks = []; let quizBag = []; 
+
+    const allQuizzes = [
+        {"cat": "용접과 관련된 안전", "q": "용접 후 뜨거운 모재를 다룰 때는 얇은 면장갑 위에 젖은 장갑을 껴서 열을 식혀야 한다.", "a": false, "exp": "젖은 장갑은 열전도를 높여 화상을 입기 쉬우며 감전의 위험이 있으므로 반드시 마른 가죽장갑을 착용해야 합니다."},
+        {"cat": "용접과 관련된 안전", "q": "아르곤(Ar) 가스는 인체에 직접적인 독성은 없으나, 밀폐공간에서는 산소 결핍을 유발할 수 있는 질식성 가스이다.", "a": true, "exp": "아르곤은 불활성 가스 독성은 없지만, 공기보다 무거워 바닥에 쌓이면 산소를 밀어내어 질식을 유발합니다."},
+        {"cat": "장비 및 도구", "q": "가스 렌즈(Gas lens)를 사용하면 쉴드 가스의 난류를 방지하고 직진성을 높여주어 텅스텐 전극을 더 길게 뽑아서 용접할 수 있다.", "a": true, "exp": "가스 렌즈 내부의 미세한 망이 가스를 층류로 만들어 가스 보호 효과를 극대화해줍니다."},
+        {"cat": "장비 및 도구", "q": "용접기 패널의 '초기 가스(Pre-flow)' 설정 시간은 용접 모재의 두께가 두꺼울수록 짧게 설정해야 한다.", "a": false, "exp": "초기 가스는 아크 발생 전 배관 및 토치 내부의 공기를 밀어내는 역할이므로 모재 두께보다는 토치 길이와 관계가 깊습니다."},
+        {"cat": "용접의 종류", "q": "GTAW 용접은 전극 자체가 녹아 용융지로 들어가는 소모성 전극식 용접법이다.", "a": false, "exp": "GTAW(TIG)의 텅스텐 전극은 열에 강해 녹지 않는 비소모성 전극이며, 필요시 별도의 용가재(용접봉)를 공급합니다."},
+        {"cat": "아크의 이해", "q": "용접 시 전류를 일정하게 두었을 때, 아크 길이를 길게 하면 아크 전압은 낮아진다.", "a": false, "exp": "아크 길이가 길어지면 전기적 저항이 증가하므로 이를 극복하기 위해 아크 전압은 상승합니다."},
+        {"cat": "용접 결함", "q": "언더컷(Undercut)은 모재 가장자리가 파인 상태로 용착금속이 채워지지 않은 결함으로, 주로 전류가 너무 높거나 운봉이 빠를 때 발생한다.", "a": true, "exp": "과도한 열로 모재가 녹아 파였으나 용가재가 충분히 채워지지 않아 발생하는 대표적 결함입니다."},
+        {"cat": "용접 결함", "q": "크레이터(Crater) 부위에 발생하는 균열을 방지하기 위해서는 용접 종료 시 전류를 서서히 낮추는 다운슬로프 기능을 꺼두는 것이 좋다.", "a": false, "exp": "크레이터 균열 방지를 위해서는 반드시 다운슬로프(전류 점감기능)를 활성화하여 용융지가 서서히 굳도록 해야 합니다."},
+        {"cat": "비파괴 검사", "q": "자분탐상검사(MT)는 스테인리스강(오스테나이트계)이나 알루미늄 용접부의 표면 결함을 검출하는 데 가장 효과적인 방법이다.", "a": false, "exp": "자분탐상검사(MT)는 자성을 띠는 철강 재료에만 적용 가능합니다. 알루미늄이나 오스테나이트계 스테인리스는 비자성이므로 침투탐상(PT)을 해야 합니다."},
+        {"cat": "재료 및 성분", "q": "탄소강은 탄소(C) 함유량이 높아질수록 경도와 강도가 증가하지만, 용접성은 오히려 떨어진다.", "a": true, "exp": "탄소량이 많아지면 용접 후 냉각 시 균열(Crack)이 발생하기 쉬워 예열 등의 추가 조치가 필요합니다."},
+        {"cat": "용접 극성", "q": "직류 정극성(DCEN)은 모재가 (+), 텅스텐 전극이 (-)인 상태를 말하며 모재에 깊은 용입을 얻을 수 있다.", "a": true, "exp": "전자는 (-)에서 (+)로 이동하며 충돌하므로, 모재가 (+)일 때 모재 쪽에 열이 약 70% 집중되어 용입이 깊어집니다."},
+        {"cat": "전원 특성", "q": "자동 용접인 GMAW(MIG/MAG)에는 주로 정전류 특성 전원과 가변송급속도 방식이 결합되어 사용된다.", "a": false, "exp": "GMAW(반자동/자동용접)에는 자기제어 특성이 있는 '정전압 특성' 전원을 주로 사용합니다."},
+        {"cat": "입열량과 변형", "q": "용접 변형을 최소화하려면 용접 속도를 느리게 하여 용접부에 입열량을 최대한 많이 가해야 한다.", "a": false, "exp": "입열량이 많을수록 열팽창과 수축이 커져 변형이 심해집니다. 변형을 줄이려면 속도를 높여 입열량을 줄여야 합니다."},
+        {"cat": "용접과 관련된 안전", "q": "밀폐된 공간에서 Ar gas가 누출되면 공기보다 무거워 바닥으로 가라앉으므로, 하단 배기를 통한 환기가 필수적이다.", "a": true, "exp": "Ar은 질식성 가스이므로 밀폐공간 바닥에 고이는 것을 막기 위해 하단 강제 배기를 실시해야 합니다."},
+        {"cat": "용접과 관련된 안전", "q": "High frequency(고주파) Arc start 장치가 켜져 있으면, Tungsten 전극이 모재에 직접 닿지 않아도 공중에서 스파크가 튀며 Arc가 발생한다.", "a": true, "exp": "고주파 전압이 공기 절연을 파괴하므로 비접촉 기동이 가능하여 Tungsten 오염을 방지합니다."},
+        {"cat": "장비 및 도구", "q": "Nozzle(세라믹 컵)의 크기를 나타내는 번호(예: #6, #8)는 숫자가 클수록 Nozzle의 내경이 작다는 것을 의미한다.", "a": false, "exp": "Nozzle 번호는 1/16 inch 단위이므로, 숫자가 클수록 내경(가스 방출구)도 커집니다."},
+        {"cat": "장비 및 도구", "q": "Gas lens 부품을 사용하면 보호 가스가 흩어지는 난류(Turbulence) 상태를 일직선으로 뻗는 층류(Laminar flow)로 바꾸어 준다.", "a": true, "exp": "Gas lens 내부의 미세 망이 가스를 곧게 뻗게 만들어 가스 보호 능력을 극대화합니다."},
+        {"cat": "용접의 종류", "q": "FCAW는 튜브형 Wire 내부에 Flux가 들어있는 소모성 전극을 사용하는 반자동 용접 공정이다.", "a": true, "exp": "플럭스가 채워진 와이어가 연속 공급되며 슬래그가 쇳물을 보호하는 널리 쓰이는 공정입니다."},
+        {"cat": "용접의 종류", "q": "SAW(Submerged Arc Welding)는 얇은 박판을 세밀하게 용접할 때 주로 사용하는 수동 용접기법이다.", "a": false, "exp": "SAW(잠호 용접)는 두꺼운 후판 강판을 하향으로 자동 용접할 때 쓰이는 대형 자동화 장비입니다."},
+        {"cat": "아크의 이해", "q": "Arc length(아크 길이)를 짧게 유지하면 Arc Voltage(전압)도 낮아지며 비드 폭이 좁아진다.", "a": true, "exp": "Arc 길이는 전압에 비례하며, 짧을수록 열이 집중되어 폭이 좁고 용입이 깊어집니다."},
+        {"cat": "아크의 이해", "q": "Arc stiffness(아크 강성)가 좋다는 것은 Arc가 부드럽게 퍼지지 않고 직진성이 강해 열을 한 곳에 정확히 모을 수 있음을 의미한다.", "a": true, "exp": "Tungsten 전극을 뾰족하게 연마하면 이 Arc 강성이 좋아져 정밀한 제어가 가능합니다."},
+        {"cat": "용접 결함", "q": "Undercut 결함은 Current가 너무 낮고 속도가 느려 쇳물이 단순히 모재 위에 얹혀진 상태를 말한다.", "a": false, "exp": "설명은 Overlap 결함에 해당합니다. Undercut은 너무 높은 Current로 인해 모재가 파인 결함입니다."},
+        {"cat": "용접 결함", "q": "용융지(Pool) 끝부분의 전류를 서서히 줄이지 않고 확 꺼버리면, 급격한 수축에 의해 파이프 모양으로 홈이 남는 Crater pipe 결함이 생긴다.", "a": true, "exp": "이를 막기 위해 용접기 패널의 Down-slope 기능을 반드시 활성화해야 합니다."},
+        {"cat": "용접 결함", "q": "Tungsten inclusion 결함은 RT(방사선 투과 검사) 필름을 판독할 때 주변보다 검고 어두운 색으로 나타난다.", "a": false, "exp": "Tungsten은 밀도가 매우 높아 방사선을 흡수하므로, 필름 상에서 주변보다 밝은(하얀) 점으로 나타납니다."},
+        {"cat": "비파괴 검사", "q": "PT(침투 탐상 검사)는 자석에 붙지 않는 Aluminum이나 Austenitic STS의 표면 결함을 검출하는 데 매우 효과적이다.", "a": true, "exp": "자성이 필요 없는 모세관 현상을 이용하므로 거의 모든 비다공성 금속의 표면 검사에 쓰입니다."},
+        {"cat": "비파괴 검사", "q": "MT(자분 탐상 검사)는 모재 내부 깊숙한 중심부에 있는 결함의 위치와 깊이를 정확하게 알 수 있다.", "a": false, "exp": "MT는 표면 결함이나 표면 바로 아래(2~3mm 이내) 결함만 검출 가능하며, 깊은 내부는 UT나 RT를 써야 합니다."},
+        {"cat": "재료 및 성분", "q": "Aluminum의 용융점은 약 660℃로 철(Fe)에 비해 매우 낮지만, 표면을 덮고 있는 산화막의 용융점은 약 2050℃로 매우 높다.", "a": true, "exp": "융점 차이가 커서 산화막을 Cleaning action(청정 작용)으로 먼저 부수지 않으면 용접이 불가능합니다."},
+        {"cat": "재료 및 성분", "q": "Stainless pipe를 GTAW로 용접할 때, 내부에 Ar gas를 채워넣는 Back purging을 실시하는 이유는 Sugaring(이면 산화)을 방지하기 위함이다.", "a": true, "exp": "산소와 결합하여 까맣게 타고 부식성이 취약해지는 것을 막기 위해 내부 공기를 차단하는 필수 작업입니다."},
+        {"cat": "용접 극성", "q": "DCEN(직류 정극성)은 전자가 모재에 충돌하므로 모재에 열이 집중되어 깊은 Penetration(용입)을 만든다.", "a": true, "exp": "GTAW 철강 용접에서 가장 표준적으로 사용되는 극성입니다."},
+        {"cat": "용접 극성", "q": "Aluminum 교류 용접에서 Cleaning action(청정 작용)은 모재가 (-)이고 전극이 (+)인 EP(역극성) 구간에서 전자가 튀어나가며 산화막을 부수는 현상이다.", "a": true, "exp": "교류 1사이클 내에서 이 EP 구간이 산화막을 파괴하고, EN 구간이 모재를 녹입니다."},
+        {"cat": "전원 특성", "q": "Constant Voltage(정전압 특성) 전원은 주로 수동 GTAW 용접에 쓰이며, 손떨림에도 일정한 전류를 유지해준다.", "a": false, "exp": "수동 용접에 쓰이는 것은 Constant Current(정전류 특성)입니다. 정전압 특성은 GMAW(반자동)에 쓰입니다."},
+        {"cat": "전원 특성", "q": "용접기의 OCV(Open Circuit Voltage)가 높으면 Arc Start는 쉬워지지만 감전(Electric shock)의 위험성은 커진다.", "a": true, "exp": "무부하 전압이 높으면 절연을 뚫기 쉬워 아크 발생엔 유리하지만 인체엔 치명적일 수 있습니다."},
+        {"cat": "입열량과 변형", "q": "용접 구간을 잘게 나누고 전체 용접 진행 방향과 반대로 용접해 나가는 Back-step 기법은 Residual stress와 Deformation을 억제하는 데 탁월하다.", "a": true, "exp": "열 누적을 분산시키고 잔류 응력을 상쇄하여 변형을 방지하는 실무적인 운봉 기법입니다."},
+        {"cat": "용접과 관련된 안전", "q": "용접기의 접지(어스)선은 아크 쏠림이나 저항을 줄이기 위해 용접하는 부위와 가급적 가까운 곳에 튼튼하게 연결하는 것이 좋다.", "a": true, "exp": "접지점(어스)이 용접부에서 너무 멀거나 부실하면 전류 흐름이 불안정해지고 아크 쏠림(Arc blow)이 발생하기 쉽습니다."},
+        {"cat": "장비 및 도구", "q": "알루미늄 용접 시 교류(AC)를 사용할 때는 텅스텐 전극봉의 끝을 바늘처럼 뾰족하게 연마하여 사용해야 한다.", "a": false, "exp": "직류(DC) 용접 시에는 끝을 뾰족하게 하지만, 알루미늄(AC) 용접 시에는 전극에 열이 많이 발생하므로 끝을 약간 둥글게(Ball 형) 만들어 아크를 안정시킵니다."},
+        {"cat": "장비 및 도구", "q": "가스 렌즈(Gas lens)를 사용하면 가스 유속이 빨라져 바람이 부는 야외에서도 완벽하게 가스 쉴드가 가능하다.", "a": false, "exp": "가스 렌즈는 층류를 만들어 쉴드 범위를 넓혀주지만, 바람이 부는 곳에서는 TIG 용접 자체가 불가능하므로 방풍막(텐트 등)을 설치해야 합니다."},
+        {"cat": "용접의 종류", "q": "마찰압접(Friction welding)은 고상용접의 일종으로, 금속을 녹이지 않고 마찰열로 달군 후 강한 압력으로 결합한다.", "a": true, "exp": "마찰용접은 외부의 열원이 아닌 부품 간의 물리적 회전 마찰열을 이용한 대표적인 압접(고상용접)입니다."},
+        {"cat": "용접의 종류", "q": "브레이징(경납땜)은 용접 후 변형이 거의 없고 서로 다른 이종 금속을 접합하기 쉬운 장점이 있다.", "a": true, "exp": "모재를 녹이지 않는 비교적 낮은 온도에서 작업하므로 열변형이 적고, 철과 구리 등 성질이 다른 금속도 접합이 가능합니다."},
+        {"cat": "아크의 이해", "q": "용접 중 아크 길이를 짧게 유지하면 아크 전압이 낮아지고 용접 비드의 폭이 좁아진다.", "a": true, "exp": "아크 길이에 비례하여 아크 전압이 변하며, 길이가 짧으면 열 분산이 적어져 비드 폭이 좁고 집중된 용입을 얻습니다."},
+        {"cat": "아크의 이해", "q": "아크 쏠림(Magnetic Arc Blow) 현상은 직류(DC)보다 교류(AC) 용접을 할 때 훨씬 심하게 발생한다.", "a": false, "exp": "교류는 전류의 방향이 계속 바뀌어 자장이 상쇄되므로 아크 쏠림이 거의 일어나지 않으며, 주로 직류(DC)에서 발생합니다."},
+        {"cat": "용접 결함", "q": "크레이터 파이프(Crater pipe)는 용접이 끝나는 지점의 쇳물이 급격히 수축하여 움푹 파이고 내부에 빈 공간이 생기는 결함이다.", "a": true, "exp": "크레이터 처리를 하지 않고 아크를 갑자기 끄면 발생하는 대표적인 수축 결함입니다."},
+        {"cat": "용접 결함", "q": "개재물 혼입(Slag inclusion)은 GTAW(TIG) 용접에서 피복아크용접(SMAW)보다 훨씬 더 자주 발생하는 결함이다.", "a": false, "exp": "GTAW는 플럭스(피복제)를 사용하지 않아 슬래그가 발생하지 않으므로, 슬래그 혼입 결함은 거의 발생하지 않습니다(텅스텐 혼입은 발생 가능)."},
+        {"cat": "용접 결함", "q": "용접 중 전극봉이 용융지나 용가재에 닿아 부러진 채로 비드 속에 남게 되는 결함을 '텅스텐 혼입'이라고 하며, 이는 주로 RT(방사선) 검사 시 하얗게(밝게) 나타난다.", "a": true, "exp": "텅스텐은 밀도(비중)가 철보다 훨씬 높아 방사선을 잘 흡수하므로 필름 상에 기공(검은색)과 반대로 밝은 흰색 점으로 나타납니다."},
+        {"cat": "비파괴 검사", "q": "침투탐상검사(PT)는 모재의 재질이 철이든 비철이든 상관없이 표면에 열려 있는 결함을 찾는 데 사용할 수 있다.", "a": true, "exp": "PT는 자성과 무관하므로 플라스틱이나 세라믹을 제외한 거의 모든 금속(알루미늄, 스텐 등) 표면 검사에 적용 가능합니다."},
+        {"cat": "비파괴 검사", "q": "액체침투탐상(PT) 검사 순서는 '전처리 -> 세척 -> 침투 -> 현상 -> 관찰' 순으로 진행된다.", "a": false, "exp": "올바른 순서는 '전처리(세척) -> 침투액 적용 -> 세척(남은 침투액 제거) -> 현상액 적용 -> 관찰' 입니다."},
+        {"cat": "재료 및 성분", "q": "탄소강 용접 시 모재를 미리 가열하는 예열(Pre-heating)은 용접 후 냉각 속도를 늦춰주어 저온 균열을 방지하는 효과가 있다.", "a": true, "exp": "예열은 모재와 용접부 간의 온도차를 줄여 급랭을 막고, 수소를 배출시켜 균열을 예방합니다."},
+        {"cat": "용접 극성", "q": "알루미늄 용접에 사용되는 고주파 교류(AC) 전원은 정극성(DCEN)과 역극성(DCEP)의 특징이 번갈아 나타난다.", "a": true, "exp": "교류 1사이클 내에서 정극성(+)으로 용입을 얻고, 역극성(-)으로 산화막을 파괴하는 청정작용을 반복합니다."},
+        {"cat": "용접 극성", "q": "고주파(High Frequency) 발생 장치가 켜져 있으면, 텅스텐 전극이 모재에 닿지 않아도 공중에서 스파크가 튀어 아크가 쉽게 발생한다.", "a": true, "exp": "고주파 전압이 공기 절연을 파괴하여 비접촉 상태에서도 아크 기동(Arc start)을 가능하게 하며, 텅스텐 오염을 방지합니다."},
+        {"cat": "전원 특성", "q": "정전압 특성 용접기는 작업자가 손으로 아크 길이를 길게 하거나 짧게 해도 용접 전류가 일정하게 유지되는 전원이다.", "a": false, "exp": "손떨림에 의해 아크 길이에 상관없이 전류가 일정하게 유지되는 것은 수하특성(정전류 특성)이며, TIG 용접기에 사용됩니다."},
+        {"cat": "입열량과 변형", "q": "용접 속도가 동일할 때, 용접 전류를 100A에서 150A로 올리면 입열량은 증가한다.", "a": true, "exp": "입열량(H=60EI/V)은 전압(E)과 전류(I)에 비례하므로 전류가 커지면 입열량도 커집니다."},
+        {"cat": "입열량과 변형", "q": "용접 비드를 한쪽 끝에서부터 연속적으로 끝까지 용접(전진법)하는 것이 부분적으로 건너뛰며 용접하는 스킵(Skip)법보다 변형이 적다.", "a": false, "exp": "한 방향으로 계속 열을 가하면 변형이 심해지므로, 대칭법, 후퇴법, 스킵법 등을 사용하여 열을 분산시켜야 변형이 적습니다."},
+        {"cat": "입열량과 변형", "q": "용접 중 구속(Restraint)이 강한 상태, 즉 모재가 움직이지 못하도록 단단히 고정된 상태로 용접하면 변형은 줄어들지만 잔류 응력은 커져 균열의 위험이 높아진다.", "a": true, "exp": "강제로 움직이지 못하게 막으면 외형 변형은 적지만, 금속 내부에서 수축하려는 힘(잔류 응력)이 그대로 갇혀서 크랙(균열)으로 이어지기 쉽습니다."},
+        {"cat": "입열량과 변형", "q": "후열처리(Post-Weld Heat Treatment) 시 가열 온도를 너무 높여 모재의 변태점 이상으로 올리면 금속의 기계적 성질이 크게 약화될 수 있다.", "a": true, "exp": "잔류응력 제거를 위한 후열처리는 반드시 모재의 재결정 온도(변태점) 이하에서 실시해야 원래 금속의 강도와 성질을 유지할 수 있습니다."},
+        {"cat": "용접과 관련된 안전", "q": "가스 실린더(봄베)는 전도 방지를 위해 체인 등으로 고정해야 하며, 직사광선이 내리쬐는 곳에 보관해야 한다.", "a": false, "exp": "가스 실린더는 폭발 위험이 있으므로 직사광선을 피해 40도 이하의 서늘하고 통풍이 잘되는 곳에 보관해야 합니다."},
+        {"cat": "용접과 관련된 안전", "q": "용접 중 눈에 이물질(슬래그나 불꽃)이 들어갔을 때는 즉시 손으로 비벼서 제거해야 한다.", "a": false, "exp": "눈을 비비면 각막에 상처가 날 수 있으므로 흐르는 물이나 식염수로 씻어내거나 병원을 방문해야 합니다."},
+        {"cat": "장비 및 도구", "q": "GTAW용 텅스텐 전극봉을 연마할 때는 연마 결이 전극봉의 길이 방향(세로)이 되도록 해야 아크가 안정된다.", "a": true, "exp": "가로 방향으로 연마하면 아크가 흔들리거나 불안정해질 수 있습니다."},
+        {"cat": "장비 및 도구", "q": "가스 쉴드 유량이 너무 적으면 대기가 유입되어 산화 결함이 생기지만, 너무 많아도 난류에 의해 결함이 생길 수 있다.", "a": true, "exp": "적정 유량 유지가 가장 중요합니다."},
+        {"cat": "용접의 종류", "q": "솔더링(연납땜)은 모재를 용융시키지 않고 용가재만 녹여 접합하는 방식이다.", "a": true, "exp": "납땜의 정의는 모재의 용융점보다 낮은 용가재를 사용하는 비용융 접합입니다."},
+        {"cat": "용접의 종류", "q": "테르밋 용접(Thermit welding)은 전기에너지를 사용하여 금속 산화물과 알루미늄 가루를 반응시킨다.", "a": false, "exp": "테르밋 용접은 외부 전기가 아니라 화학 반응(산화-환원) 시 발생하는 강한 열을 이용합니다."},
+        {"cat": "아크의 이해", "q": "아크 용접 시 아크 전압은 아크 길이에 비례하여 변한다.", "a": true, "exp": "아크가 길어지면 저항이 커져서 전압이 올라가고, 짧아지면 전압이 내려갑니다."},
+        {"cat": "아크의 이해", "q": "용접 아크의 온도는 중심부에서 약 5,000 ~ 20,000℃에 달하는 고온의 상태이다.", "a": true, "exp": "아크는 플라즈마 상태로 매우 높은 열에너지를 가집니다."},
+        {"cat": "용접 결함", "q": "스패터(Spatter)는 용접 중 튀어나오는 금속 알갱이로, GTAW 용접에서는 SMAW(피복아크)에 비해 거의 발생하지 않는다.", "a": true, "exp": "GTAW는 아크가 매우 깨끗하고 정적이며 불순물이 적어 스패터가 거의 없습니다."},
+        {"cat": "용접 결함", "q": "언더필(Underfill) 결함은 비드 표면이 모재보다 높게 솟아오른 상태를 말한다.", "a": false, "exp": "언더필은 비드가 모재 표면보다 낮은(충전 부족) 상태를 말합니다."},
+        {"cat": "용접 결함", "q": "용접부의 '웜홀(Worm hole)'은 기공이 마치 벌레가 지나간 자국처럼 길게 이어진 형태의 결함이다.", "a": true, "exp": "응고 속도와 가스 배출 속도의 차이로 인해 관 모양의 기공이 생기는 현상입니다."},
+        {"cat": "비파괴 검사", "q": "자분탐상검사(MT)는 비자성체인 구리나 알루미늄 용접부 검사에도 널리 사용된다.", "a": false, "exp": "자분탐상은 자석에 붙는 강자성체(철 등)에만 사용 가능합니다."},
+        {"cat": "비파괴 검사", "q": "방사선 투과 시험(RT) 결과 필름에서 기공(Porosity)은 주변보다 검은색 점으로 나타난다.", "a": true, "exp": "기공 부분은 금속이 없어 방사선이 더 많이 투과되므로 필름이 더 검게 노출됩니다."},
+        {"cat": "재료 및 성분", "q": "연강(저탄소강)은 탄소 함유량이 적어 용접성이 매우 우수하며 일반적인 구조물에 많이 쓰인다.", "a": true, "exp": "탄소량이 0.3% 이하인 연강은 균열 위험이 적어 용접이 쉽습니다."},
+        {"cat": "재료 및 성분", "q": "스테인리스강 용접 시 발생하는 크롬 6가 흄은 인체에 무해하므로 별도의 마스크가 필요 없다.", "a": false, "exp": "크롬 흄은 발암 물질로 분류될 만큼 매우 유해하므로 전용 방진마스크와 환기가 필수입니다."},
+        {"cat": "용접 극성", "q": "GTAW에서 직류 역극성(DCEP)은 모재의 용입이 가장 깊게 나오는 극성이다.", "a": false, "exp": "역극성은 용입이 가장 얕고 전극봉이 쉽게 녹습니다. 용입이 깊은 것은 정극성(DCEN)입니다."},
+        {"cat": "용접 극성", "q": "알루미늄 용접 시 교류(AC)를 사용하는 이유는 반 사이클마다 전극에서 전자가 튀어나와 표면의 산화막을 파괴하기 위해서이다.", "a": true, "exp": "이것이 교류의 청정 작용(Cleaning Action)입니다."},
+        {"cat": "전원 특성", "q": "용접기의 정전류 특성은 아크 길이가 변해도 용접 전류값이 일정하게 유지되려는 성질이다.", "a": true, "exp": "수동 용접인 TIG와 피복아크용접기의 핵심 특성입니다."},
+        {"cat": "입열량과 변형", "q": "용접 입열량이 과도하면 결정립이 조대화되어 용접부의 인성이 떨어진다.", "a": true, "exp": "너무 많은 열을 주면 금속 조직이 커져서 충격에 약해집니다."},
+        {"cat": "입열량과 변형", "q": "용접 변형을 방지하기 위해 가접(Tack weld)을 튼튼하게 하고 순서를 대칭적으로 가져가는 것이 좋다.", "a": true, "exp": "열의 균형을 맞추고 구조적 강성을 높여 변형을 억제하는 기본 원칙입니다."},
+        {"cat": "용접과 관련된 안전", "q": "용접용 가죽장갑은 화상 예방뿐만 아니라 감전을 막아주는 절연체 역할도 하므로 항상 건조한 상태를 유지해야 한다.", "a": true, "exp": "땀이나 물에 젖은 장갑은 전기 저항이 낮아져 감전 위험이 매우 커집니다."},
+        {"cat": "용접과 관련된 안전", "q": "Ar(아르곤) 가스는 공기보다 가벼우므로, 가스 누출 시 천장 쪽에 모이게 된다.", "a": false, "exp": "Ar 가스는 공기보다 무거워 바닥에 가라앉으므로 밀폐공간 하단의 환기가 중요합니다."},
+        {"cat": "장비 및 도구", "q": "Gas lens를 사용하면 난류가 생겨 가스 보호막이 쉽게 흩어지므로 야외 용접에 적합하다.", "a": false, "exp": "Gas lens는 가스를 층류(Laminar flow)로 곧게 뻗게 만들어 보호 효과를 높여주는 장치입니다."},
+        {"cat": "장비 및 도구", "q": "Pulse TIG에서 Background current(베이스 전류)는 Arc가 꺼지지 않게 유지하면서 용융지를 순간적으로 냉각시키는 역할을 한다.", "a": true, "exp": "Peak current로 녹이고 Background current로 식히는 과정을 반복하여 열 조절을 쉽게 합니다."},
+        {"cat": "용접의 종류", "q": "SMAW(피복아크용접)는 용접봉 자체가 녹아서 쇳물이 되는 소모성 전극 용접이다.", "a": true, "exp": "SMAW는 전극(용접봉)이 닳아 없어지지만, GTAW는 Tungsten 전극이 소모되지 않습니다."},
+        {"cat": "용접의 종류", "q": "마찰용접(Friction welding)은 고상용접(Solid-state welding)의 일종으로, 외부에서 가스 토치로 열을 가한 뒤 압력을 주어 접합한다.", "a": false, "exp": "외부 열원이 아니라 두 부품을 직접 회전시켜 발생하는 기계적 마찰열로 결합하는 방식입니다."},
+        {"cat": "아크의 이해", "q": "DCEN(직류 정극성)에서는 Arc 열의 약 70%가 모재에 집중된다.", "a": true, "exp": "전자가 전극(-)에서 튀어나와 모재(+)에 충돌하면서 모재 쪽에 더 큰 열을 발생시킵니다."},
+        {"cat": "아크의 이해", "q": "GTAW 용접 시 Arc length가 너무 길면 가스 보호 범위를 벗어나 Porosity(기공)가 발생할 확률이 높다.", "a": true, "exp": "Arc가 길면 Shielding gas 커버리지가 분산되어 외부 공기가 침투하기 쉽습니다."},
+        {"cat": "용접 결함", "q": "Undercut 결함은 용접 전류가 너무 낮아서 모재가 충분히 녹지 않았을 때 주로 발생한다.", "a": false, "exp": "Undercut은 전류가 너무 높거나 운봉이 너무 빨라 모재가 과도하게 파인 후 쇳물이 채워지지 않은 결함입니다."},
+        {"cat": "용접 결함", "q": "Overlap 결함은 용융 금속이 모재 표면과 융합(Fusion)되지 않고 단순히 덮어 씌워진 상태를 말한다.", "a": true, "exp": "쇳물이 너무 차갑거나 운봉이 느려 모재를 녹이지 못한 채 얹혀진 불량입니다."},
+        {"cat": "용접 결함", "q": "저온 균열(Cold crack)은 용접이 끝난 후 금속이 식으면서 주로 수소(Hydrogen) 가스에 의해 유발된다.", "a": true, "exp": "수소 지연 균열이라고도 하며, 용접부에 침투한 수소가 굳은 후 팽창하면서 균열을 일으킵니다."},
+        {"cat": "비파괴 검사", "q": "RT(방사선 투과 검사)는 X-ray나 감마선을 쏘아 필름에 맺힌 상을 보고 내부 결함을 판단한다.", "a": true, "exp": "내부 기공이나 불순물을 직관적인 사진으로 확인할 수 있는 대표적인 내부 검사법입니다."},
+        {"cat": "비파괴 검사", "q": "MT(자분 탐상 검사)는 알루미늄이나 오스테나이트계 스테인리스강의 표면 결함 검사에 매우 효과적이다.", "a": false, "exp": "MT는 자석에 붙는 강자성체(일반 철재)에만 사용할 수 있습니다."},
+        {"cat": "재료 및 성분", "q": "스테인리스강(STS)은 크롬(Cr) 성분이 표면에 치밀한 산화막을 형성하여 녹이 스는 것을 방지한다.", "a": true, "exp": "크롬이 11~12% 이상 함유되어 부동태 피막을 형성하는 것이 스테인리스의 핵심입니다."},
+        {"cat": "재료 및 성분", "q": "두꺼운 알루미늄 판을 용접할 때는 열전도율이 매우 높아 예열(Pre-heating)을 하는 것이 절대 금지되어 있다.", "a": false, "exp": "알루미늄은 열전도율이 너무 높아 열을 금방 빼앗기므로 두꺼운 모재는 초기 용입을 얻기 위해 예열을 실시합니다."},
+        {"cat": "용접 극성", "q": "알루미늄 용접에 교류(AC)를 사용하는 주된 이유는 전극의 플러스 구간에서 산화막을 파괴하는 청정 작용을 얻기 위해서이다.", "a": true, "exp": "교류의 DCEP(역극성) 사이클이 산화알루미늄 피막을 깨주는 필수적인 역할을 합니다."},
+        {"cat": "전원 특성", "q": "수동 GTAW 용접기는 아크 길이가 변해도 전압이 일정하게 유지되는 '정전압 특성'을 사용한다.", "a": false, "exp": "작업자의 손떨림에 대비해 전류가 일정하게 유지되는 '정전류 특성(수하 특성)'을 사용합니다. 정전압은 반자동(GMAW)용입니다."},
+        {"cat": "입열량과 변형", "q": "용접 속도(V)를 빠르게 하면 용접부 단위 길이당 들어가는 입열량(Heat input)은 증가한다.", "a": false, "exp": "입열량은 속도에 반비례하므로 속도를 빠르게 하면 열이 적게 들어가 입열량이 감소합니다."},
+        {"cat": "입열량과 변형", "q": "용접 부위를 해머 등으로 두드려주는 Peening 작업은 용접부의 잔류 응력을 완화시키는 효과가 있다.", "a": true, "exp": "표면을 타격하여 소성 변형을 주면 수축하려는 응력을 풀어주어 균열을 방지합니다."},
+        {"cat": "입열량과 변형", "q": "구속 지그(Jig)로 모재를 강하게 고정해 놓고 용접하면 눈에 보이는 외부 변형은 줄어들지만 내부에 갇힌 잔류 응력은 커진다.", "a": true, "exp": "외형적 틀어짐(각변형)은 억제할 수 있으나, 수축하려는 힘이 내부에 쌓여 균열(Crack)의 위험성이 높아집니다."},
+        {"cat": "용접과 관련된 안전", "q": "고압 가스 실린더(Cylinder)의 밸브를 열 때는 밸브 정면에서 얼굴을 마주 보고 신속하게 확 열어야 이물질이 잘 빠진다.", "a": false, "exp": "고압 가스 방출 시 압력으로 인해 파편이 튈 수 있으므로 반드시 밸브 측면(옆)에 서서 천천히 열어야 합니다."},
+        {"cat": "용접과 관련된 안전", "q": "화재를 A, B, C급으로 분류할 때, C급 화재는 전기로 인한 화재를 의미하며 이때는 물을 뿌리면 감전 위험이 있다.", "a": true, "exp": "C급(전기 화재)은 CO2(이산화탄소)나 분말 소화기 등 전기가 통하지 않는 소화 약제를 사용해야 합니다."},
+        {"cat": "장비 및 도구", "q": "Torch 내부의 Collet(콜릿)은 Tungsten 전극의 굵기가 1.6mm든 2.4mm든 상관없이 하나의 사이즈로 모두 꽉 조여 사용할 수 있다.", "a": false, "exp": "Collet은 텅스텐 전극의 직경(굵기)과 정확히 일치하는 사이즈를 사용해야 전기가 제대로 통하고 전극이 흔들리지 않습니다."},
+        {"cat": "장비 및 도구", "q": "Gas lens 부품을 Torch에 장착하면 Shielding gas의 층류가 형성되어 도달 거리가 길어지므로, Tungsten 전극을 Nozzle 밖으로 조금 더 길게 뽑아서 용접할 수 있다.", "a": true, "exp": "Gas lens는 난류를 억제하고 보호가스를 일직선으로 모아주어 깊은 홈 용접 시 전극을 길게 뺄 수 있게 해줍니다."},
+        {"cat": "장비 및 도구", "q": "Pulse GTAW 기능 사용 시, 전류가 높은 Peak time(피크 시간)의 유지 비율(%)을 낮추면 모재에 가해지는 전체 입열량(Heat input)은 증가한다.", "a": false, "exp": "Peak time은 모재를 녹이는 고전류 구간이므로, 이 시간을 낮추면(짧게 하면) 전체 열에너지가 줄어들어 입열량이 감소합니다."},
+        {"cat": "용접의 종류", "q": "FCAW (Flux Cored Arc Welding)는 내부가 비어있고 그 안에 Flux(용제)가 채워져 있는 와이어를 사용하는 소모성 전극 용접법이다.", "a": true, "exp": "플럭스 코어드 와이어를 연속으로 공급하며 용접하는 널리 쓰이는 반자동 용접입니다."},
+        {"cat": "용접의 종류", "q": "Electroslag welding(일렉트로슬래그 용접)은 두꺼운 철판(후판)의 수직 상진 용접에 주로 사용되는 고상 용접(Solid-state welding)이다.", "a": false, "exp": "일렉트로슬래그 용접은 슬래그의 저항열로 모재와 용접봉을 녹이는 '용융 용접'에 속합니다."},
+        {"cat": "아크의 이해", "q": "용접 중 Arc 전압은 Arc length(길이)에 비례하므로, Torch를 모재에서 높이 띄울수록 전압계의 수치는 올라간다.", "a": true, "exp": "Arc 길이가 길어지면 전기 저항이 커져 전압이 동반 상승하는 것이 아크의 기본 특성입니다."},
+        {"cat": "아크의 이해", "q": "GTAW 용접 시 Ar(아르곤) 가스에 He(헬륨)을 혼합하여 사용하면, 순수 Ar을 사용할 때보다 Arc 전압이 낮아지고 용입이 얕아진다.", "a": false, "exp": "헬륨(He)은 이온화 전압이 아르곤보다 높아 He을 섞으면 Arc 전압이 크게 상승하고 모재에 들어가는 열에너지가 커져 용입이 아주 깊어집니다."},
+        {"cat": "용접 결함", "q": "Spatter(스패터)는 용접 중 쇳물이 사방으로 튀어 모재에 들러붙는 현상으로, GTAW 공정은 SMAW에 비해 Spatter 발생이 극히 드물다.", "a": true, "exp": "GTAW는 비소모성 전극과 보호가스를 사용하여 Arc가 매우 정숙하므로 Spatter가 거의 없습니다."},
+        {"cat": "용접 결함", "q": "Undercut 결함은 용접 전류가 너무 낮고 운봉 속도가 느릴 때 모재가 녹지 못해서 주로 발생한다.", "a": false, "exp": "Undercut은 전류가 너무 '높거나' 운봉 속도가 너무 '빠를 때' 과도한 열로 모재가 파인 후 쇳물이 채워지지 않아 발생합니다."},
+        {"cat": "용접 결함", "q": "Hot crack(고온 균열)은 용접 쇳물이 굳기 시작하는 고온 단계에서 결정 입계에 모인 유황(S)이나 인(P) 같은 불순물로 인해 발생하기 쉽다.", "a": true, "exp": "S, P 등 융점이 낮은 불순물이 금속 응고 시 마지막까지 남아 결합력을 약하게 만들어 갈라지게 합니다."},
+        {"cat": "비파괴 검사", "q": "검사원의 눈과 손전등, 돋보기 등을 이용하는 육안 검사(VT)는 용접부 내부 깊숙이 위치한 미세한 Porosity를 찾아내는 데 매우 효과적이다.", "a": false, "exp": "VT(육안 검사)는 겉으로 드러난 표면 결함(비드 외관, Undercut 등)만 확인할 수 있습니다."},
+        {"cat": "비파괴 검사", "q": "UT (초음파 탐상 검사)는 내부 결함을 찾는 데 뛰어나며, RT(방사선 투과 검사)와 달리 결함이 표면으로부터 얼마나 깊은 곳에 있는지(깊이)를 정확히 알 수 있는 장점이 있다.", "a": true, "exp": "초음파가 부딪혀 돌아오는 시간차를 계산하므로 결함의 수직적 깊이(Depth) 파악에 탁월합니다."},
+        {"cat": "재료 및 성분", "q": "알루미늄(Al) 금속은 비중이 약 2.7로, 철(Fe, 비중 약 7.8)에 비해 매우 가벼운 경금속에 속한다.", "a": true, "exp": "알루미늄은 가볍고 열전도율이 높은 대표적인 비철 금속입니다."},
+        {"cat": "재료 및 성분", "q": "황동(Brass)은 구리(Cu)와 주석(Sn)을 주성분으로 하는 합금을 일컫는 말이다.", "a": false, "exp": "황동(놋쇠, Brass)은 구리와 아연(Zn)의 합금이며, 구리와 주석(Sn)의 합금은 청동(Bronze)입니다."},
+        {"cat": "용접 극성", "q": "AC(교류) 용접 시에는 전압의 +와 - 극성이 주기적으로 계속 바뀌므로, 용접 중 DCEN(용입 깊음)과 DCEP(산화막 파괴)의 특성이 번갈아 나타난다.", "a": true, "exp": "1초에 수십 번씩 극성이 교차하므로 알루미늄 용접 시 용입과 청정 작용을 동시에 얻을 수 있습니다."},
+        {"cat": "전원 특성", "q": "정전압 특성을 가진 반자동 용접기(GMAW 등)에서는 Torch가 멀어져 Arc length가 길어지면, 기계가 스스로 전류를 급격히 줄여 와이어 녹는 속도를 늦춤으로써 원래 Arc length를 회복한다.", "a": true, "exp": "이를 '자기 제어 특성(Self-regulating characteristic)'이라 하며 정전압 전원의 핵심 원리입니다."},
+        {"cat": "입열량과 변형", "q": "용접 공식(H=60EI/V)에 따라, 용접 속도(V)를 느리게 진행할수록 모재 단위 길이당 들어가는 입열량(Heat input)은 더 작아진다.", "a": false, "exp": "운봉 속도가 느려지면 같은 구간에 열이 더 오래 가해지므로 입열량은 '커집니다(증가)'."},
+        {"cat": "입열량과 변형", "q": "Pre-heating(예열)을 실시하면 모재와 용접부 간의 온도 차이를 줄여 냉각 속도가 느려지므로, 열영향부(HAZ)의 경화를 막고 수소 지연 균열(저온 균열)을 예방할 수 있다.", "a": true, "exp": "예열은 금속을 천천히 굳게 하여 유해 가스(수소)가 빠져나갈 시간을 벌어주고 단단하게 깨지는 성질을 줄여줍니다."},
+        {"cat": "용접과 관련된 안전", "q": "용접면의 차광 유리(Filter plate)는 용접 전류가 높을수록 차광 번호가 높은(더 어두운) 것을 사용해야 한다.", "a": true, "exp": "용접 전류가 높을수록 발생하는 자외선과 가시광선이 강해지므로, 눈을 보호하기 위해 더 어두운 번호의 유리를 장착해야 합니다."},
+        {"cat": "용접과 관련된 안전", "q": "밀폐 공간에 고압 가스 용기(Cylinder)를 보관하는 것은 환기가 안 되더라도 작업의 편리성을 위해 허용된다.", "a": false, "exp": "밀폐 공간에 가스 용기를 두면 미세한 누출로도 산소 결핍(질식)이나 폭발이 일어날 수 있으므로 절대 반입이나 보관을 해서는 안 됩니다."},
+        {"cat": "장비 및 도구", "q": "Tungsten 전극봉을 연마할 때는 연마석의 결이 전극봉의 가로 방향이 되도록 갈아야 Arc가 똑바로 모아진다.", "a": false, "exp": "가로 방향으로 연마하면 Arc가 흔들리고 흩어지게 됩니다. 반드시 전극봉의 길이 방향(세로 방향)으로 결이 나도록 연마해야 합니다."},
+        {"cat": "장비 및 도구", "q": "Gas lens를 사용하면 Shielding gas가 난류(Turbulence) 상태가 되어 주변 공기를 밀어내는 힘이 강해진다.", "a": false, "exp": "Gas lens는 가스를 소용돌이치는 난류가 아니라, 일직선으로 곱게 뻗는 층류(Laminar flow) 상태로 만들어 주어 보호막을 극대화하는 부품입니다."},
+        {"cat": "용접의 종류", "q": "Brazing(경납땜)은 모재를 융점 이상으로 녹이지 않고, 용가재만 녹여서 틈새로 스며들게 하는 모세관 현상을 주로 이용한다.", "a": true, "exp": "모재를 녹이지 않으므로 열변형이 적고, 좁은 간극 사이로 용융된 용가재가 빨려 들어가는 힘(모세관 현상)으로 접합합니다."},
+        {"cat": "아크의 이해", "q": "Arc의 온도는 주변부보다 중심부가 온도가 더 높으며, 이 가장 뜨거운 중심부를 Arc core(아크 코어)라고 부른다.", "a": true, "exp": "Arc core는 플라즈마 상태의 중심 기둥으로 열 집중도가 가장 높은 영역입니다."},
+        {"cat": "아크의 이해", "q": "용접 전류의 수치를 낮추면 Arc 열이 약해져서 모재가 깊게 녹지 않는다.", "a": true, "exp": "전류는 입열량과 직결되므로, 전류가 낮으면 모재를 녹이는 힘(용입 깊이)이 얕아집니다."},
+        {"cat": "용접 결함", "q": "Undercut은 용접 전류가 너무 낮고 용접 속도가 느릴 때 모재가 녹지 않아 생기는 결함이다.", "a": false, "exp": "Undercut은 반대로 전류가 너무 높고 운봉 속도가 빠를 때, 모재가 과도하게 녹아 파인 곳에 쇳물이 채워지지 못해 생깁니다."},
+        {"cat": "용접 결함", "q": "Crater 균열을 방지하려면 용접을 끝낼 때 Torch 스위치를 갑자기 끄지 않고 Down-slope 기능을 사용해 전류를 천천히 줄여야 한다.", "a": true, "exp": "전류를 천천히 줄이면 용융지가 서서히 식으면서 수축에 의한 균열(Crater crack)을 막을 수 있습니다."},
+        {"cat": "용접 결함", "q": "Tungsten inclusion(텅스텐 혼입) 결함이 발생했을 경우, 결함 부위를 갈아내지 않고 그 위에 고전류로 덧살을 올려 용접하면 텅스텐이 알아서 녹아 없어진다.", "a": false, "exp": "텅스텐의 융점(약 3400도)은 철(약 1500도)보다 훨씬 높아 용접열로는 녹지 않습니다. 반드시 Grinder 등으로 완전히 파내고 재용접해야 합니다."},
+        {"cat": "비파괴 검사", "q": "MT(Magnetic Particle Testing)는 표면 결함뿐만 아니라 표면 바로 아래(표면 하)에 있는 미세한 내부 결함도 일부 검출할 수 있다.", "a": true, "exp": "MT는 자력선의 누설을 이용하므로 표면에 열려 있지 않은 2~3mm 이내의 얕은 표면 하 결함도 찾아낼 수 있습니다."},
+        {"cat": "재료 및 성분", "q": "연강(Mild steel)은 탄소 함량이 매우 적어 열을 가해도 쉽게 갈라지므로 용접성이 매우 나쁜 재료이다.", "a": false, "exp": "탄소량이 적은 연강(저탄소강)은 열영향부 경화나 저온 균열 위험이 적어 모든 강철 중에서 용접성이 가장 우수한 재료입니다."},
+        {"cat": "재료 및 성분", "q": "오스테나이트계 스테인리스강(300계열)은 자석에 아주 잘 붙는 강자성체이므로 MT(자분 탐상) 검사가 가능하다.", "a": false, "exp": "오스테나이트계 STS는 니켈(Ni) 함유로 인해 자성을 띠지 않는 비자성체입니다. 따라서 MT는 불가능하며 PT(침투 탐상)를 사용해야 합니다."},
+        {"cat": "용접 극성", "q": "알루미늄 용접 시 표면의 산화막을 깨트리는 현상을 청정 작용(Cleaning action)이라 하며, 이는 AC 전원의 DCEP(직류 역극성) 구간에서 발생한다.", "a": true, "exp": "DCEP 구간에서 모재(-)로부터 튀어 나가는 전자가 두꺼운 산화알루미늄 피막을 깨는 역할을 합니다."},
+        {"cat": "용접 극성", "q": "DCEN(직류 정극성)은 모재가 (+), 전극이 (-)이므로 전자가 모재를 떠나 전극으로 충돌하기 때문에 전극봉이 쉽게 과열되어 녹아내린다.", "a": false, "exp": "설명이 반대로 되었습니다. DCEN은 전자가 전극(-)을 떠나 모재(+)에 충돌하므로 모재가 깊게 녹습니다. 전극봉이 녹아내리는 것은 DCEP(역극성)입니다."},
+        {"cat": "전원 특성", "q": "수하 특성 전원은 Arc length가 짧아져 전압이 낮아질 때 전류가 미세하게 증가하여 Arc가 꺼지는 것을 막고 안정성을 유지해 준다.", "a": true, "exp": "전압과 전류가 반비례하는 곡선(수하 특성) 덕분에 단락(합선) 시에도 전류가 무한히 오르지 않고 안정적인 Arc를 유지합니다."},
+        {"cat": "전원 특성", "q": "용접기의 무부하 전압(Open-circuit voltage)은 용접을 하지 않고 전원만 켜져 있을 때 양극단(Torch와 모재)에 걸려 있는 전압을 말한다.", "a": true, "exp": "기기 작동 전 대기 상태의 전압으로, Arc를 처음 발생시킬 때 필요한 힘입니다(전격 사고의 주원인이기도 합니다)."},
+        {"cat": "입열량과 변형", "q": "용접 입열량(Heat input)이 모재의 두께에 비해 너무 높으면 모재가 과열되어 팽창과 수축이 커지므로 변형(Deformation)이 심해진다.", "a": true, "exp": "입열량이 과다하면 열변형이 심해지고 결정립이 조대화되어 기계적 성질도 나빠집니다."},
+        {"cat": "입열량과 변형", "q": "역변형법(Pre-setting)은 용접 후 수축으로 인해 모재가 휠 것을 예상하여, 사전에 미리 반대 방향으로 각도를 주어 가접하는 변형 방지법이다.", "a": true, "exp": "용접 변형을 역으로 이용하여 용접이 끝난 후 모재가 일직선으로 펴지게 만드는 가장 효과적인 조립 기술입니다."},
+        {"cat": "입열량과 변형", "q": "Peening(피닝) 작업은 초층(Root pass) 용접 직후에 실시해야 슬래그 박리성이 좋아지고 잔류 응력 제거 효과가 가장 크다.", "a": false, "exp": "초층 비드나 가장 표면 비드는 두께가 얇고 강도가 약해 Peening(망치질)을 하면 오히려 크랙(Crack)이 발생하기 쉬우므로 실시하지 않는 것이 원칙입니다."},
+        {"cat": "용접과 관련된 안전", "q": "산소나 가스 Regulator(조정기)를 장착할 때는 결합을 부드럽게 하기 위해 나사산에 소량의 기름(Oil)이나 구리스를 발라주는 것이 좋다.", "a": false, "exp": "고압의 산소나 보호가스 라인에 기름이나 구리스가 닿으면 마찰이나 압력에 의해 폭발할 위험이 있으므로 절대 금지합니다."},
+        {"cat": "용접과 관련된 안전", "q": "아연도금 강판을 용접할 때 발생하는 하얀색 Fume(흄)을 다량 흡입하면, 오한과 발열을 동반하는 금속열(Metal fume fever)에 걸릴 수 있다.", "a": true, "exp": "아연(Zinc)이 타면서 발생하는 Fume은 인체에 매우 유해하여 급성 호흡기 질환인 금속열을 유발하므로 방진마스크 착용이 필수입니다."},
+        {"cat": "장비 및 도구", "q": "오염되거나 뭉툭해진 Tungsten 전극봉을 다시 뾰족하게 만들기 위해 니퍼나 펜치로 끝부분을 뚝 부러뜨려 그대로 사용해도 무방하다.", "a": false, "exp": "전극을 강제로 부러뜨리면 미세하게 갈라져 Arc가 흔들리므로, 반드시 전용 절단기나 그라인더로 잘라내고 세로 방향으로 연마해야 합니다."},
+        {"cat": "장비 및 도구", "q": "식별색이 빨간색인 토륨 텅스텐(Thoriated tungsten) 전극봉은 전자 방출이 우수하지만, 토륨 성분에 미량의 방사능 물질이 포함되어 있어 연마 시 분진을 흡입하지 않도록 주의해야 한다.", "a": true, "exp": "2% 토륨 텅스텐은 방사성 물질 이슈가 있어 분진 흡입을 피해야 하며, 최근에는 이를 대체하기 위해 세륨(회색)이나 란탄 전극이 많이 쓰입니다."},
+        {"cat": "용접의 종류", "q": "GTAW 공정은 텅스텐 전극이 직접 녹아서 모재의 틈을 채워주는 소모성 전극 용접이다.", "a": false, "exp": "GTAW의 Tungsten 전극은 열을 내기만 할 뿐 소모되지 않는(비소모성) 전극이며, 필요 시 별도의 용접봉(용가재)을 쇳물에 공급합니다."},
+        {"cat": "용접의 종류", "q": "Laser welding(레이저 용접)은 기계적 에너지를 마찰열로 바꾸는 고상 용접(Solid-state welding)의 한 종류이다.", "a": false, "exp": "레이저 용접은 강력한 빛 에너지(레이저 빔)를 열원으로 사용하여 모재를 깊게 녹이는 정밀 용융 용접법입니다."},
+        {"cat": "아크의 이해", "q": "용접 전류의 수치를 높이면 Arc의 열이 강해져 모재를 녹이는 힘, 즉 용입(Penetration)이 깊어진다.", "a": true, "exp": "전류는 입열량의 핵심 요소이므로 전류 상승은 곧 아크 열에너지의 증가와 용입 깊이 증가로 이어집니다."},
+        {"cat": "아크의 이해", "q": "DCEN 용접 시 Tungsten 전극봉의 끝을 둥글고 뭉툭하게 연마할수록 Arc stiffness(아크 강성)가 좋아져 쇳물 제어가 쉽다.", "a": false, "exp": "전극 끝이 뭉툭하면 Arc가 넓게 퍼져 강성이 떨어집니다. 끝을 뾰족하게 연마해야 Arc가 뻣뻣하고 직진성 있게 집중됩니다."},
+        {"cat": "용접 결함", "q": "GTAW는 쇳물이 튀는 Spatter(스패터) 결함이 SMAW나 GMAW에 비해 훨씬 자주 발생하는 편이다.", "a": false, "exp": "GTAW는 비소모성 전극을 사용하고 아크가 매우 부드러워 Spatter 발생이 전무하다시피 한 가장 깨끗한 용접법입니다."},
+        {"cat": "용접 결함", "q": "용접을 마치는 부분에 쇳물이 움푹 파인 채로 굳어 생기는 Crater pipe 결함은, 급격한 수축에 의해 발생하는 균열(Crack)의 일종으로 취급된다.", "a": true, "exp": "Crater 부위가 덜 채워지면 응고 수축 시 중심부로 응력이 집중되어 미세한 별 모양 균열(Crater crack)이 쉽게 발생합니다."},
+        {"cat": "비파괴 검사", "q": "용접이 완전히 끝난 후 가장 마지막에 실시해야 하는 비파괴 검사는 VT(육안 검사)이다.", "a": false, "exp": "VT(육안 검사)는 가장 기본적이고 선행되어야 하는 검사로, 외관상 합격해야 다음 단계(RT, UT 등)로 넘어갈 수 있습니다."},
+        {"cat": "비파괴 검사", "q": "PT(액체 침투 탐상 검사)를 실시하기 위해서는 먼저 검사할 모재에 강력한 자석을 붙여 자화시켜야 한다.", "a": false, "exp": "자석을 사용하는 것은 MT(자분 탐상)입니다. PT는 모세관 현상을 이용하므로 자성과는 전혀 무관합니다."},
+        {"cat": "재료 및 성분", "q": "알루미늄(Al)은 철(Fe)보다 훨씬 가벼운 금속이지만, 용융점(녹는 온도)은 철보다 훨씬 높다.", "a": false, "exp": "순수 알루미늄의 용융점은 약 660도이며, 철(약 1530도)보다 훨씬 낮아 용접 시 순식간에 녹아내릴 수 있어 주의가 필요합니다."},
+        {"cat": "재료 및 성분", "q": "Pre-heating(예열) 작업은 용접 후 모재가 너무 빨리 식는 것을 방지하여(냉각 속도 감소), 열영향부가 딱딱해지는 것을 막아준다.", "a": true, "exp": "예열은 모재 전체의 온도를 올려 급랭을 막음으로써 조직의 경화와 균열을 예방하는 핵심 기술입니다."},
+        {"cat": "용접 극성", "q": "탄소강(Carbon steel) 배관을 GTAW로 용접할 때는 기본적으로 AC(교류) 전원을 설정하여 작업한다.", "a": false, "exp": "탄소강이나 스테인리스강은 깊은 용입을 얻기 위해 DCEN(직류 정극성)을 사용하는 것이 표준입니다."},
+        {"cat": "용접 극성", "q": "교류(AC) 알루미늄 용접에서 전극이 (+), 모재가 (-)가 되는 반 사이클(Half-cycle) 동안 표면의 산화막이 깨지는 Cleaning action이 일어난다.", "a": true, "exp": "모재(-)에서 전극(+)으로 튀어 오르는 전자들이 모재 표면의 단단한 산화알루미늄 피막을 타격하여 부수는 원리입니다."},
+        {"cat": "전원 특성", "q": "용접기의 무부하 전압(Open-circuit voltage)은 용접 중 아크가 켜져 있을 때 흐르는 아크 전압보다 항상 낮다.", "a": false, "exp": "무부하 전압(기계가 켜져만 있는 상태)은 아크를 최초로 발생시키기 위해 약 60~80V로 높게 설정되어 있으며, 용접이 시작되면 아크 전압(10~20V)으로 뚝 떨어집니다."},
+        {"cat": "전원 특성", "q": "수동 용접기(정전류 특성)는 작업자의 손떨림으로 Arc length가 살짝 길어지면, 전류가 수십 암페어(A)씩 크게 출렁여 쇳물 제어를 어렵게 한다.", "a": false, "exp": "정전류 특성은 Arc length가 변하여 전압이 오르락내리락해도 전류의 변화폭이 극히 적어(일정하게 유지) 쇳물 제어를 오히려 편하게 해줍니다."},
+        {"cat": "입열량과 변형", "q": "용접 시 Weaving(위빙) 폭을 너무 넓게 하여 운봉 속도가 느려지면 모재에 가해지는 열이 많아져 변형이 커진다.", "a": true, "exp": "Weaving이 과도하면 속도가 느려지고 입열량(H)이 증가하여 금속의 팽창과 수축이 심해집니다."},
+        {"cat": "입열량과 변형", "q": "두꺼운 판의 초층 용접(Root pass) 직후 잔류 응력을 제거하기 위해, 얇은 초층 비드 위에 즉각적으로 Peening(피닝) 타격을 가하는 것이 권장된다.", "a": false, "exp": "초층 비드는 두께가 얇고 취약하여 Peening(해머질)을 가하면 그 충격으로 즉시 크랙(균열)이 발생할 수 있으므로 절대 피닝을 하지 않습니다."},
+        {"cat": "용접과 관련된 안전", "q": "GTAW는 SMAW처럼 눈에 보이는 시커먼 연기(Fume)가 많이 나지 않으므로, 환기 장치나 방진 마스크 없이 작업해도 호흡기 질환의 위험이 전혀 없다.", "a": false, "exp": "GTAW에서도 눈에 잘 보이지 않는 미세한 금속 Fume과 오존(O3) 등 유해 가스가 발생하므로 환기와 마스크 착용은 필수입니다."},
+        {"cat": "용접과 관련된 안전", "q": "Earth(접지) Clamp를 모재에 물릴 때는 페인트나 녹이 슬어 있는 부위를 피해서 전기가 잘 통하는 깨끗한 금속 표면에 단단히 고정해야 한다.", "a": true, "exp": "접지 부위의 전기 저항이 높으면 Arc가 불안정해지고 Arc blow 현상이나 단자 과열이 발생할 수 있습니다."},
+        {"cat": "장비 및 도구", "q": "Torch 스위치는 단순히 Arc를 켜고 끄는 기능만 하므로, 전류를 서서히 줄여주는 Crater fill 기능은 스위치 조작과 무관하다.", "a": false, "exp": "용접기 패널에서 Crater 기능을 켜두면, 스위치를 놓았을 때(Off) 아크가 바로 꺼지지 않고 설정된 Down-slope 시간에 맞춰 전류가 서서히 줄어듭니다."},
+        {"cat": "장비 및 도구", "q": "Gas lens를 장착하면 Shielding gas가 직진성이 강한 Laminar flow(층류)로 분사되므로, 코너 부위나 깊은 홈 용접 시 Tungsten 전극을 평소보다 더 길게 빼서 용접할 수 있다.", "a": true, "exp": "층류는 가스 보호 영역을 길고 안정적으로 유지시켜 주므로 전극봉의 돌출 길이(Stick-out)를 더 늘려 시야를 확보할 수 있게 해줍니다."},
+        {"cat": "용접의 종류", "q": "FCAW(Flux Cored Arc Welding)는 튜브 형태의 와이어 내부에 쇳물을 덮어 보호하는 Flux가 채워져 있는 소모성 전극 용접이다.", "a": true, "exp": "와이어 자체가 녹으면서 내부의 Flux가 슬래그를 형성해 쇳물을 보호하는 반자동 용접법입니다."},
+        {"cat": "용접의 종류", "q": "Brazing(경납땜)은 접합하고자 하는 두 모재의 끝을 완전히 용융점 이상으로 녹여서 하나로 합치는 융접(Fusion welding)의 일종이다.", "a": false, "exp": "Brazing은 모재를 녹이지 않고, 모재보다 용융점이 낮은 용가재만 녹여서 틈새로 스며들게 하는 모세관 현상을 이용한 접합법입니다."},
+        {"cat": "아크의 이해", "q": "Arc length가 짧아질수록 전기적 저항이 줄어들기 때문에 Arc 전압은 감소한다.", "a": true, "exp": "Arc 길이는 전압과 정비례하는 성질을 가지고 있습니다."},
+        {"cat": "아크의 이해", "q": "Arc blow(자기 쏠림) 현상은 전류의 방향이 계속해서 바뀌는 AC(교류) 용접을 할 때 가장 심하게 발생한다.", "a": false, "exp": "AC는 극성이 초당 수십 번씩 바뀌어 자기장이 상쇄되므로 Arc blow가 거의 발생하지 않습니다. 주로 DC(직류) 용접에서 문제가 됩니다."},
+        {"cat": "용접 결함", "q": "Undercut 결함은 용접 열이 너무 강해 모재가 파인 후 그 공간을 쇳물(용가재)이 채워주지 못해서 발생한 골짜기 형태의 결함이다.", "a": true, "exp": "과전류나 너무 빠른 운봉으로 인해 발생하는 대표적인 형상 결함입니다."},
+        {"cat": "용접 결함", "q": "Tungsten inclusion(텅스텐 혼입) 결함이 발생한 쇳물 위에 용접 전류를 높여서 덧씌우기(Pass)를 하면 내부의 텅스텐 조각이 자연스럽게 녹아 없어진다.", "a": false, "exp": "텅스텐의 융점은 철보다 훨씬 높아 용접 열로는 녹지 않고 그대로 내부에 남아 응력 집중부가 되므로 반드시 그라인더로 파내야 합니다."},
+        {"cat": "용접 결함", "q": "Hot crack(고온 균열)은 용접부가 쇳물 상태에서 응고(Solidification)될 때, 황(S) 등의 불순물이 결정 입계에 남아 결합력을 약하게 만들어 갈라지는 현상이다.", "a": true, "exp": "금속이 굳는 고온 단계에서 수축 응력을 견디지 못하고 불순물이 모인 취약한 부위가 갈라지는 현상입니다."},
+        {"cat": "비파괴 검사", "q": "RT(방사선 투과 검사)를 실시할 때는 방사선 피폭 위험이 있으므로 반드시 작업자들을 대피시키고 통제 구역을 설정해야 한다.", "a": true, "exp": "X선이나 감마선은 인체에 매우 치명적이므로 안전 보건 수칙에 따라 엄격한 격리가 필요합니다."},
+        {"cat": "비파괴 검사", "q": "MT(자분 탐상 검사)는 알루미늄이나 동(Copper) 합금 같은 비자성 금속의 미세한 표면 크랙을 찾는 데 매우 적합하다.", "a": false, "exp": "MT는 자석에 붙는 강자성체 전용 검사법이므로 알루미늄이나 동 합금에는 절대 사용할 수 없고 PT를 사용해야 합니다."},
+        {"cat": "재료 및 성분", "q": "가장 널리 쓰이는 철강 재료인 탄소강(Carbon steel)은 철(Fe)에 일정량의 탄소(C)가 합금되어 강도가 조절된 금속이다.", "a": true, "exp": "탄소 함유량에 따라 저탄소강, 중탄소강, 고탄소강으로 분류되며 탄소가 많을수록 단단해집니다."},
+        {"cat": "재료 및 성분", "q": "304, 316 계열의 오스테나이트계 STS(스테인리스강)는 용접 후 자석을 대보면 찰칵하고 아주 강하게 달라붙는 특징이 있다.", "a": false, "exp": "오스테나이트계 STS는 니켈(Ni) 성분으로 인해 자성을 잃어버린 비자성체이므로 자석에 붙지 않습니다."},
+        {"cat": "용접 극성", "q": "DCEN(직류 정극성)은 전자가 모재에서 출발하여 Tungsten 전극으로 충돌하므로 전극봉이 쉽게 녹아내리는 극성이다.", "a": false, "exp": "설명이 반대입니다. DCEN은 전자가 전극(-)에서 출발하여 모재(+)로 충돌하므로 전극봉은 보호되고 모재가 깊게 녹습니다."},
+        {"cat": "용접 극성", "q": "알루미늄 교류(AC) 용접에서 산화막을 파괴하는 Cleaning action(청정 작용)은 1사이클 중 모재가 (-), 전극이 (+)가 되는 EP(역극성) 구간에서 일어난다.", "a": true, "exp": "모재(-)에서 전극(+) 방향으로 튀어나가는 전자가 표면의 끈질긴 산화알루미늄 피막을 깨부수게 됩니다."},
+        {"cat": "전원 특성", "q": "용접기의 전원 특성 중 Constant Current(정전류 특성)는 아크 길이가 길어지든 짧아지든 전압이 단 1볼트(V)도 변하지 않는 성질을 말한다.", "a": false, "exp": "정전류 특성은 전압이 변할 때 전류(Current) 값이 거의 변하지 않도록 설계된 것이지 전압이 고정된 것이 아닙니다."},
+        {"cat": "전원 특성", "q": "인버터(Inverter)형 용접기는 입력된 교류를 직류로 바꾼 뒤 다시 수십 kHz의 고주파 교류로 변환하고 다시 직류로 정류하는 과정을 거쳐 변압기 크기를 획기적으로 줄인 방식이다.", "a": true, "exp": "주파수가 높아질수록 동일한 전력을 변환하는 트랜스포머(변압기)의 코어 크기를 대폭 소형화, 경량화할 수 있는 인버터 회로의 원리입니다."},
+        {"cat": "입열량과 변형", "q": "Weaving(위빙) 폭을 너무 넓게 가져가면 용접의 진행 속도(운봉 속도)가 느려지므로 결과적으로 모재 단위 길이당 Heat input(입열량)은 감소하게 된다.", "a": false, "exp": "운봉 속도가 느려지면 같은 구간에 열이 더 오래 머물게 되므로 Heat input(입열량)은 대폭 증가하게 되어 열변형과 결정립 조대화의 원인이 됩니다."},
+        {"cat": "용접과 관련된 안전", "q": "밀폐된 공간에서 Ar gas 누출 시, 공기보다 가벼워 위로 날아가므로 바닥에 누워있으면 질식을 피할 수 있다.", "a": false, "exp": "Ar gas는 공기보다 무거워 바닥부터 쌓이므로, 밀폐 공간의 하단부에 있으면 산소 결핍으로 인한 질식 위험이 가장 큽니다."},
+        {"cat": "용접과 관련된 안전", "q": "GTAW Torch를 사용할 때 발생하는 High frequency는 주변의 Pacemaker를 착용한 사람에게 치명적인 영향을 줄 수 있다.", "a": true, "exp": "고주파는 강력한 전자기파 간섭을 일으켜 심박 조율기 같은 정밀 의료 기기의 오작동을 유발할 수 있으므로 접근을 엄격히 금지해야 합니다."},
+        {"cat": "장비 및 도구", "q": "Gas lens를 Torch에 장착하면 가스의 난류를 Laminar flow로 바꿔주므로, 좁은 Groove 용접 시 Tungsten 전극을 평소보다 더 길게 뽑아 쓸 수 있다.", "a": true, "exp": "Gas lens는 보호 가스의 직진성을 높여 보호 범위가 늘어나므로 전극봉 돌출 길이를 연장할 수 있습니다."},
+        {"cat": "장비 및 도구", "q": "Water-cooled Torch 시스템에서 냉각수가 흐르지 않을 때 용접기 출력을 차단하는 안전 장치를 Flow switch라고 한다.", "a": true, "exp": "Flow switch는 냉각수의 유량을 감지하여 물이 순환하지 않으면 즉시 전원을 끊어 Power cable이 타버리는 것을 막습니다."},
+        {"cat": "용접의 종류", "q": "FCAW는 비소모성 전극을 사용하며 별도의 용가재를 손으로 공급하는 수동 용접이다.", "a": false, "exp": "FCAW는 내부가 Flux로 채워진 와이어가 자동으로 연속 공급되며 녹는 소모성 전극 방식의 반자동 용접입니다."},
+        {"cat": "용접의 종류", "q": "Friction welding은 전기 Arc의 열을 이용하여 두 모재의 끝단을 녹인 후 압력을 가해 붙이는 용융 용접법이다.", "a": false, "exp": "Friction welding은 외부 열원 없이 모재를 고속으로 회전시킬 때 발생하는 기계적 마찰열로 금속을 부드럽게 한 후 압착하는 Solid-state welding입니다."},
+        {"cat": "아크의 이해", "q": "용접 Current를 높게 설정할수록 Arc 열에너지가 강해져서 모재의 Penetration 깊이가 깊어진다.", "a": true, "exp": "용접 전류는 입열량과 직결되므로 전류가 증가하면 금속을 녹이는 힘도 강해집니다."},
+        {"cat": "아크의 이해", "q": "Arc blow 현상을 줄이기 위해서는 Earth를 용접부에서 최대한 멀리 떨어진 곳에 한 군데만 연결해야 한다.", "a": false, "exp": "Earth가 멀거나 한쪽으로 치우치면 자기장의 불균형이 심해져 Arc blow가 악화됩니다. 최대한 가까이, 혹은 양쪽으로 분산시켜야 합니다."},
+        {"cat": "용접 결함", "q": "Undercut 결함은 용접 전류가 너무 과도하거나 운봉 속도가 너무 빠를 때, 모재가 파인 부분을 쇳물이 채워주지 못해서 발생한다.", "a": true, "exp": "Undercut은 지나친 열로 모재가 녹아내려 형성된 골짜기 형태의 치명적인 결함입니다."},
+        {"cat": "용접 결함", "q": "Porosity는 용접 쇳물 속에 녹아있던 Gas가 응고 과정에서 밖으로 빠져나오지 못하고 내부에 갇혀 생성된 구멍이다.", "a": true, "exp": "표면 오염물이나 Shielding gas 부족으로 인해 침투한 가스가 응고 시 배출되지 못해 생기는 내부 결함입니다."},
+        {"cat": "용접 결함", "q": "Cold crack은 용접부가 응고되는 뜨거운 상태에서 발생하며, 주로 황(S)이나 인(P) 같은 불순물이 원인이다.", "a": false, "exp": "뜨거운 상태에서 불순물에 의해 갈라지는 것은 Hot crack입니다. Cold crack은 냉각 후 수소 가스에 의해 시간차를 두고 발생합니다."},
+        {"cat": "비파괴 검사", "q": "VT는 육안과 돋보기, 용접 게이지 등을 사용하여 Bead 표면의 결함이나 치수를 확인하는 가장 기본적이고 선행되어야 할 비파괴 검사이다.", "a": true, "exp": "모든 비파괴 검사의 첫 단계는 VT이며, 표면이 합격해야 내부 검사를 진행할 수 있습니다."},
+        {"cat": "비파괴 검사", "q": "UT는 결함의 종류를 필름으로 직관적으로 보여주므로 RT보다 결함 형태 판독이 훨씬 쉽다.", "a": false, "exp": "직관적인 형태 판독은 RT가 뛰어나며, UT는 초음파 파형을 보므로 결함의 깊이와 위치 측정에 유리하지만 형태 판독은 어렵습니다."},
+        {"cat": "재료 및 성분", "q": "오스테나이트계 STS 용접 시 Chrome fume이 발생하므로, 반드시 방진마스크를 착용하고 국소 배기 장치를 가동해야 한다.", "a": true, "exp": "크롬이 고온에서 타면서 발생하는 6가 크롬 흄은 발암 물질이므로 철저한 호흡기 보호가 필수입니다."},
+        {"cat": "재료 및 성분", "q": "탄소강 용접 시 Pre-heating 온도를 너무 높게 설정하여 오랫동안 유지하면, 오히려 결정립이 조대화되어 충격에 약해질 수 있다.", "a": true, "exp": "적절한 예열은 좋으나, 과도한 예열과 장시간 유지는 HAZ의 금속 조직을 거칠게 만들어 인성 저하를 초래합니다."},
+        {"cat": "용접 극성", "q": "DCEN은 전자가 모재에서 출발하여 Tungsten 전극에 충돌하는 극성이다.", "a": false, "exp": "DCEN은 전자가 전극에서 출발하여 모재로 충돌하므로 모재 쪽에 열이 약 70% 집중되어 깊은 Penetration을 만듭니다."},
+        {"cat": "용접 극성", "q": "AC를 사용하는 Aluminum 용접에서 AC Balance 설정을 EP 비율 90%로 극단적으로 높이면, 산화막은 잘 깨지지만 Tungsten 전극이 녹아 떨어질 위험이 매우 커진다.", "a": true, "exp": "EP 구간은 전극에 열이 집중되므로, 비율이 너무 높으면 전극이 견디지 못하고 녹아 쇳물로 떨어지게 됩니다."},
+        {"cat": "전원 특성", "q": "Drooping characteristic(수하 특성)을 가진 수동 용접기는 작업자가 손을 떨어 Arc length가 변해도 Current 값이 거의 일정하게 유지된다.", "a": true, "exp": "수하 특성 덕분에 전압 변동에 따른 전류 변화폭이 적어 수동 용접 시 안정적인 Bead를 만들 수 있습니다."},
+        {"cat": "전원 특성", "q": "Constant Voltage(정전압 특성) 전원에서는 Torch가 모재에서 멀어져 Arc length가 길어지면, 기계가 자체적으로 전류를 급격히 낮춰 와이어 송급 속도와 균형을 맞추는 Self-regulating이 작동한다.", "a": true, "exp": "이것이 반자동 용접에서 정전압 특성을 사용하는 핵심 이유이며, 일정한 Arc 길이를 스스로 복원합니다."},
+        {"cat": "입열량과 변형", "q": "용접 진행 방향과 반대로 일정 구간씩 짧게 나누어 Back-step으로 용접하면, 열이 한쪽으로 누적되지 않아 모재의 Deformation을 효과적으로 줄일 수 있다.", "a": true, "exp": "Back-step법은 잔류 응력을 상쇄시키고 열 분포를 균일하게 하여 변형을 억제하는 대표적인 운봉 기법입니다."}
+    ];
+
+    const TOWER_SPECS = {
+        FCAW: { color: '#e67e22', range: 250, cd: 40, baseDmg: 12, cost: 50, splashBase: 50 },
+        GTAW: { color: '#9b59b6', range: 140, cd: 25, baseDmg: 35, cost: 100, splashBase: 0 }
+    };
+
+    // ★ 스펙 수정: 용착불량(Fusion) 추가 및 밸런스(속도) 상향
+    const ENEMY_SPECS = {
+        Spatter:  { label: '스패터', hp: 30, speed: 2.2, radius: 7, reward: 5, color: '#e74c3c', dmg: 5 },
+        Porosity: { label: '기공', hp: 60, speed: 1.6, radius: 12, reward: 10, color: '#2ecc71', dmg: 15 },
+        Undercut: { label: '언더컷', hp: 120, speed: 1.2, radius: 14, reward: 15, color: '#7f8c8d', dmg: 30 },
+        Overlap:  { label: '오버랩', hp: 200, speed: 1.0, radius: 15, reward: 20, color: '#8e44ad', dmg: 40 },
+        Fusion:   { label: '용착불량', hp: 80, speed: 2.5, radius: 13, reward: 20, color: '#f39c12', dmg: 40 }, // 신규 자폭몹
+        Crack:    { label: '크랙 (보스)', hp: 1500, speed: 0.6, radius: 28, reward: 100, color: '#c0392b', dmg: 100 }
+    };
+
+    function initGameData() {
+        gameState = { 
+            status: 'standby', resources: 300, speed: 1, 
+            baseMaxHp: 200, baseHp: 200,
+            beadShield: 0, notchLv: 0, heatLv: 0, regenProgress: 0,
+            wave: 0, frameCount: 0, waveTimerFrames: 0, bossSpawned: false,
+            quizTotal: 0, quizCorrect: 0, penaltyActive: false, 
+            midQuizTriggered: false, fusionToSpawn: 0, // 용착불량 스폰 카운터
+            selectedTower: null, buildTargetPos: null 
+        };
+        towers = []; enemies = []; projectiles = []; particles = []; baseCracks = [];
+        quizBag = [...allQuizzes].sort(() => Math.random() - 0.5);
+
+        for(let i=0; i<25; i++) {
+            let pts = [{x: 5 + Math.random()*50, y: 30 + Math.random()*620}];
+            let segments = 3 + Math.floor(Math.random()*4);
+            let angle = (Math.random() - 0.5) * Math.PI;
+            for(let j=0; j<segments; j++) {
+                angle += (Math.random()-0.5) * 1.5; 
+                let len = 8 + Math.random()*20;
+                let nx = pts[pts.length-1].x + Math.cos(angle)*len;
+                let ny = pts[pts.length-1].y + Math.sin(angle)*len;
+                nx = Math.max(2, Math.min(75, nx)); 
+                pts.push({x: nx, y: ny});
+            }
+            baseCracks.push({ pts: pts, thresh: 0.1 + Math.random() * 0.8 });
+        }
+        updateUI();
+        document.getElementById('btn-speed').innerText = '▶ 속도 x1';
+        document.getElementById('btn-playpause').innerText = '일시정지';
+        document.getElementById('btn-playpause').className = 'ctrl-btn btn-play';
+    }
+
+    function drawEnemy(ctx, e) {
+        ctx.translate(e.x, e.y); ctx.fillStyle = e.color;
+        if (e.type === 'Spatter') { ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill(); } 
+        else if (e.type === 'Porosity') {
+            ctx.fillRect(-e.radius, -e.radius, e.radius*2, e.radius*2); ctx.fillStyle = '#111';
+            ctx.beginPath(); ctx.arc(-5, -5, 2.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(5, 5, 2.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(-4, 4, 1.5, 0, Math.PI*2); ctx.fill();
+        } else if (e.type === 'Undercut') {
+            ctx.fillRect(-e.radius, -e.radius, e.radius*2, e.radius*2);
+            ctx.fillStyle = '#111'; ctx.fillRect(-e.radius, -2, e.radius*2, 4);
+        } else if (e.type === 'Overlap') {
+            ctx.beginPath(); ctx.arc(-e.radius/2.5, 0, e.radius*0.7, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(e.radius/2.5, 0, e.radius*0.7, 0, Math.PI*2); ctx.fill();
+        } else if (e.type === 'Fusion') {
+            // ★ 신규 결함: 용착불량 (찌그러진 다각형)
+            ctx.beginPath();
+            let r = e.radius;
+            ctx.moveTo(-r, -r + 2);
+            ctx.lineTo(0, -r - 4);
+            ctx.lineTo(r, -r + 3);
+            ctx.lineTo(r + 4, 0);
+            ctx.lineTo(r - 2, r);
+            ctx.lineTo(-2, r + 5);
+            ctx.lineTo(-r, r - 1);
+            ctx.lineTo(-r - 3, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5; ctx.stroke();
+        } else if (e.type === 'Crack') {
+            ctx.fillRect(-e.radius, -e.radius, e.radius*2, e.radius*2);
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(-e.radius, -e.radius/2); ctx.lineTo(-e.radius/2, 2); ctx.lineTo(e.radius/2, -8); ctx.lineTo(e.radius, e.radius/2); ctx.stroke();
+        }
+        ctx.fillStyle = '#ecf0f1'; ctx.font = '12px Malgun Gothic bold'; ctx.textAlign = 'center';
+        ctx.fillText(e.label, 0, -e.radius - 8); ctx.textAlign = 'left';
+        ctx.translate(-e.x, -e.y);
+    }
+
+    canvas.addEventListener('click', (e) => {
+        if (gameState.status !== 'playing') return;
+        const rect = canvas.getBoundingClientRect();
+        
+        const mx = (e.clientX - rect.left) / currentScale; 
+        const my = (e.clientY - rect.top) / currentScale;
+
+        if(mx < 90) { openBaseMenu(mx, my); return; }
+        
+        let clickedTower = towers.find(t => Math.hypot(t.x - mx, t.y - my) < 35);
+        if (clickedTower) { openUpgradeMenu(clickedTower, mx, my); } 
+        else {
+            if (!towers.some(t => Math.hypot(t.x - mx, t.y - my) < 30)) { openBuildMenu(mx, my); } 
+            else { closeMenus(); }
+        }
+    });
+
+    function positionMenu(menu, mx, my) {
+        // iOS 안전: 다른 메뉴 강제 숨김 후 단 하나만 표시 + 백드롭 ON
+        const ids = ['build-menu', 'upgrade-menu', 'base-menu'];
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el && el !== menu) el.style.display = 'none';
+        }
+        menu.style.display = 'flex';
+        menu.scrollTop = 0;
+        _showBackdrop();
+    }
+
+    function openBuildMenu(mx, my) { closeMenus(); gameState.buildTargetPos = {x: mx, y: my}; positionMenu(document.getElementById('build-menu'), mx, my); }
+    function openUpgradeMenu(tower, mx, my) { closeMenus(); gameState.selectedTower = tower; refreshUpgradeMenu(); positionMenu(document.getElementById('upgrade-menu'), mx, my); }
+    function openBaseMenu(mx, my) { closeMenus(); refreshBaseMenu(); positionMenu(document.getElementById('base-menu'), mx, my); }
+    function closeMenus() {
+        document.getElementById('build-menu').style.display = 'none';
+        document.getElementById('upgrade-menu').style.display = 'none';
+        document.getElementById('base-menu').style.display = 'none';
+        _hideBackdrop();
+        gameState.selectedTower = null;
+        gameState.buildTargetPos = null;
+    }
+
+    window.startGame = function() {
+        document.getElementById('intro-overlay').style.display = 'none';
+        gameState.status = 'playing';
+        if(gameState.wave === 0) startNextWave();
+        requestAnimationFrame(gameLoop);
+    }
+
+    window.resetGame = function() {
+        document.getElementById('gameover-overlay').style.display = 'none';
+        document.getElementById('intro-overlay').style.display = 'flex'; 
+        initGameData(); 
+    }
+    
+    window.toggleSpeed = function() {
+        gameState.speed = (gameState.speed % 3) + 1; 
+        document.getElementById('btn-speed').innerText = `▶ 속도 x${gameState.speed}`;
+    }
+
+    window.togglePause = function() {
+        if(gameState.status === 'playing') {
+            gameState.status = 'paused';
+            document.getElementById('btn-playpause').innerText = '▶ 계속하기';
+            document.getElementById('btn-playpause').className = 'ctrl-btn btn-play';
+        } else if (gameState.status === 'paused') {
+            gameState.status = 'playing';
+            document.getElementById('btn-playpause').innerText = '⏸ 일시정지';
+            document.getElementById('btn-playpause').className = 'ctrl-btn btn-pause';
+            requestAnimationFrame(gameLoop);
+        }
+    }
+    
+    window.quitGame = function() { if(confirm('게임을 종료하시겠습니까?')) triggerGameOver(true); }
+
+    window.buyBaseUpgrade = function(type) {
+        let cost = getBaseUpgCost(type);
+        if (gameState.resources >= cost) {
+            gameState.resources -= cost;
+            if(type === 'alloy') { gameState.baseHp = Math.min(gameState.baseMaxHp, gameState.baseHp + 50); } 
+            else if (type === 'bead') { gameState.beadShield += 100; } 
+            else if (type === 'notch') { gameState.notchLv++; } 
+            else if (type === 'heat') { gameState.heatLv++; }
+            updateUI(); refreshBaseMenu();
+        }
+    }
+    function getBaseUpgCost(type) { if(type==='alloy') return 80; if(type==='bead') return 100; if(type==='notch') return 150 + (gameState.notchLv * 50); if(type==='heat') return 120 + (gameState.heatLv * 40); }
+    function refreshBaseMenu() {
+        document.getElementById('btn-base-alloy').disabled = (gameState.resources < 80 || gameState.baseHp >= gameState.baseMaxHp);
+        document.getElementById('btn-base-bead').disabled = (gameState.resources < 100);
+        document.getElementById('cost-base-notch').innerText = getBaseUpgCost('notch'); document.getElementById('btn-base-notch').disabled = (gameState.resources < getBaseUpgCost('notch'));
+        document.getElementById('cost-base-heat').innerText = getBaseUpgCost('heat'); document.getElementById('btn-base-heat').disabled = (gameState.resources < getBaseUpgCost('heat'));
+    }
+
+    // ★ 로봇 체력 속성 부여 (hp: 100)
+    window.buildTower = function(type) {
+        if (gameState.resources >= TOWER_SPECS[type].cost) {
+            gameState.resources -= TOWER_SPECS[type].cost;
+            towers.push({ 
+                x: gameState.buildTargetPos.x, y: gameState.buildTargetPos.y, 
+                type: type, hp: 100, maxHp: 100, cooldown: 0, angle: 0, 
+                upg: { current: 0, voltage: 0, gas: 0, filler: 0 }, 
+                torch_end: {x: gameState.buildTargetPos.x, y: gameState.buildTargetPos.y} 
+            });
+            updateUI(); closeMenus();
+        }
+    };
+    function getUpgCost(type, lv) { if(type==='current'||type==='voltage') return 40 + lv*20; if(type==='gas') return 50 + lv*25; return 30 + lv*15; }
+    
+    window.buyUpgrade = function(upgType) {
+        let t = gameState.selectedTower; if(!t) return;
+        let cost = getUpgCost(upgType, t.upg[upgType]);
+        if (gameState.resources >= cost) { gameState.resources -= cost; t.upg[upgType]++; updateUI(); refreshUpgradeMenu(); }
+    };
+    
+    function getTowerTotalCost(t) {
+        let total = TOWER_SPECS[t.type].cost;
+        let types = ['current', 'voltage', 'gas', 'filler'];
+        types.forEach(type => { for(let i=0; i<t.upg[type]; i++) total += getUpgCost(type, i); });
+        return total;
+    }
+    
+    window.sellTower = function() {
+        let t = gameState.selectedTower; if(!t) return;
+        let refund = Math.floor(getTowerTotalCost(t) / 2);
+        gameState.resources += refund;
+        towers = towers.filter(tower => tower !== t);
+        createFloatingText(t.x, t.y, `철거 +${refund}⚡`, "#f1c40f", 16);
+        updateUI(); closeMenus();
+    }
+
+    function refreshUpgradeMenu() {
+        let t = gameState.selectedTower; if(!t) return;
+        document.getElementById('upg-title').innerText = `${t.type} 로봇 (총 Lv.${t.upg.current + t.upg.voltage + t.upg.gas + t.upg.filler})`;
+        ['current', 'voltage', 'gas', 'filler'].forEach(type => { let c = getUpgCost(type, t.upg[type]); document.getElementById(`cost-${type}`).innerText = c; document.getElementById(`btn-upg-${type}`).disabled = (gameState.resources < c); });
+        document.getElementById('refund-amt').innerText = `+${Math.floor(getTowerTotalCost(t)/2)}⚡`;
+    }
+
+    function updateUI() {
+        document.getElementById('resources').innerText = gameState.resources;
+        document.getElementById('base-hp').innerText = Math.floor(gameState.baseHp);
+        document.getElementById('bead-hp-ui').innerText = gameState.beadShield > 0 ? ` (+비드보호: ${gameState.beadShield})` : '';
+        document.getElementById('wave-num').innerText = gameState.wave;
+        document.getElementById('wave-timer').innerText = Math.max(0, Math.ceil(gameState.waveTimerFrames / 60));
+        document.getElementById('quiz-total').innerText = gameState.quizTotal;
+        document.getElementById('quiz-correct').innerText = gameState.quizCorrect;
+        document.getElementById('regen-fill').style.width = gameState.regenProgress + '%';
+    }
+
+    function getNextQuiz() {
+        if(quizBag.length === 0) { quizBag = [...allQuizzes].sort(() => Math.random() - 0.5); }
+        return quizBag.pop();
+    }
+
+    function triggerQuiz() {
+        gameState.status = 'paused'; 
+        currentQuiz = getNextQuiz();
+        document.getElementById('quiz-cat-ui').innerText = `[ ${currentQuiz.cat} ]`;
+        document.getElementById('quiz-text').innerText = "Q. " + currentQuiz.q;
+        document.getElementById('quiz-exp').style.display = 'none';
+        document.getElementById('quiz-buttons').style.display = 'block';
+        document.getElementById('btn-next-wave').style.display = 'none';
+        document.getElementById('quiz-overlay').style.display = 'flex';
+        closeMenus();
+    }
+    
+    // ★ 무조건 해설(exp)을 노출하도록 수정 완료
+    window.answerQuiz = function(userAnswer) {
+        document.getElementById('quiz-buttons').style.display = 'none';
+        gameState.quizTotal++;
+        
+        let expText = currentQuiz.exp ? `\n\n[해설]\n${currentQuiz.exp}` : "";
+
+        if (userAnswer === currentQuiz.a) {
+            gameState.resources += 100;
+            gameState.quizCorrect++;
+            document.getElementById('quiz-exp').innerText = `✅ 정답입니다! (자원 +100)${expText}`;
+            document.getElementById('quiz-exp').style.color = '#2ecc71';
+        } else {
+            gameState.penaltyActive = true;
+            document.getElementById('quiz-exp').innerText = `❌ 오답입니다! (이번 웨이브 적 능력치 대폭 강화)${expText}`;
+            document.getElementById('quiz-exp').style.color = '#e74c3c';
+        }
+        document.getElementById('quiz-exp').style.display = 'block'; 
+        document.getElementById('btn-next-wave').style.display = 'block'; 
+        updateUI();
+    };
+    
+    window.resumeGame = function() { 
+        document.getElementById('quiz-overlay').style.display = 'none'; 
+        gameState.status = 'playing'; 
+        requestAnimationFrame(gameLoop); 
+    };
+
+    function startNextWave() {
+        gameState.wave++;
+        gameState.waveTimerFrames = 30 * 60; 
+        gameState.bossSpawned = false;
+        gameState.penaltyActive = false;
+        gameState.midQuizTriggered = false; // ★ 중간 퀴즈 플래그
+        
+        // ★ 용착불량 스폰 횟수 세팅
+        gameState.fusionToSpawn = gameState.wave < 10 ? 10 : gameState.wave;
+        
+        triggerQuiz();
+    }
+
+    function spawnNormalEnemy(isFusion = false) {
+        let type;
+        if (isFusion) {
+            type = 'Fusion';
+        } else {
+            let typesAvailable = ['Spatter'];
+            if(gameState.wave >= 2) typesAvailable.push('Porosity');
+            if(gameState.wave >= 4) typesAvailable.push('Undercut');
+            if(gameState.wave >= 6) typesAvailable.push('Overlap');
+            type = typesAvailable[Math.floor(Math.random() * typesAvailable.length)];
+        }
+        let spec = ENEMY_SPECS[type];
+        
+        // 난이도 상승 (체력 & 속도)
+        let diffMult = 1.0 + (gameState.wave * 0.15);
+        let speedMult = 1.0 + (gameState.wave * 0.02);
+        let totalHpMult = diffMult * (gameState.penaltyActive ? 1.5 : 1.0); 
+        
+        enemies.push({ 
+            x: canvas.width + 20, y: 80 + Math.random() * (canvas.height - 160), 
+            type: type, label: spec.label, hp: spec.hp * totalHpMult, maxHp: spec.hp * totalHpMult, 
+            speed: spec.speed * speedMult * (Math.random()*0.4 + 0.8),
+            radius: spec.radius, color: spec.color, reward: spec.reward, dmg: spec.dmg, slowTimer: 0 
+        });
+    }
+
+    function spawnBossSwarm() {
+        let spec = ENEMY_SPECS['Crack'];
+        let diffMult = 1.0 + (gameState.wave * 0.15);
+        let totalHpMult = diffMult * (gameState.penaltyActive ? 1.5 : 1.0); 
+        
+        let bossCount = 1 + Math.floor(gameState.wave / 10);
+        
+        let swarmTypes = ['Spatter'];
+        if (gameState.wave >= 5) swarmTypes.push('Porosity');
+        if (gameState.wave >= 15) swarmTypes.push('Undercut');
+        if (gameState.wave >= 25) { swarmTypes.push('Overlap'); swarmTypes.shift(); } 
+
+        for(let b=0; b<bossCount; b++) {
+            let bossX = canvas.width + 80 + (b * 150); 
+            let bossY = canvas.height / 2 + ((b - Math.floor(bossCount/2)) * 80);
+
+            let bossObj = { 
+                id: 'boss_' + gameState.frameCount + '_' + b,
+                x: bossX, y: bossY, 
+                type: 'Crack', label: spec.label, hp: spec.hp * totalHpMult, maxHp: spec.hp * totalHpMult, 
+                speed: spec.speed * (1.0 + gameState.wave * 0.01), radius: spec.radius, color: spec.color, reward: spec.reward, dmg: spec.dmg, slowTimer: 0 
+            };
+            enemies.push(bossObj);
+            
+            let swarmCount = 8 + Math.floor(gameState.wave * 0.6);
+            if(swarmCount > 24) swarmCount = 24; 
+
+            for(let i=0; i<swarmCount; i++) {
+                let sType = swarmTypes[Math.floor(Math.random() * swarmTypes.length)];
+                let sSpec = ENEMY_SPECS[sType];
+                
+                let angle = (i / swarmCount) * Math.PI * 2;
+                let dist = bossObj.radius + sSpec.radius + 15 + Math.random() * 10;
+                let offsetX = Math.cos(angle) * dist;
+                let offsetY = Math.sin(angle) * dist;
+
+                enemies.push({
+                    x: bossX + offsetX, y: bossY + offsetY, 
+                    type: sType, label: sSpec.label, hp: sSpec.hp * totalHpMult, maxHp: sSpec.hp * totalHpMult, 
+                    speed: bossObj.speed, 
+                    radius: sSpec.radius, color: sSpec.color, reward: sSpec.reward, dmg: sSpec.dmg, slowTimer: 0,
+                    bossRef: bossObj, offsetX: offsetX, offsetY: offsetY 
+                });
+            }
+        }
+    }
+
+    function drawAndCalculateRobot(ctx, t, spec, actualRange) {
+        let totalLv = t.upg.current + t.upg.voltage + t.upg.gas + t.upg.filler;
+        let scale = 0.33 + (totalLv * 0.015); 
+        const L1 = 45, L2 = 65, L3 = 55, J4L = 15;
+        const J1 = 0, J2 = -Math.PI/6, J3 = Math.PI/3, J4 = -Math.PI/6;
+
+        let cx = 0, cy = 0, ang = 0;
+        ang+=J1; cx+=L1*Math.cos(ang); cy+=L1*Math.sin(ang);
+        ang+=J2; cx+=L2*Math.cos(ang); cy+=L2*Math.sin(ang);
+        ang+=J3; cx+=L3*Math.cos(ang); cy+=L3*Math.sin(ang);
+        ang+=J4; cx+=J4L*Math.cos(ang); cy+=J4L*Math.sin(ang);
+
+        let J5_wx = t.x + cx * scale; let J5_wy = t.y + cy * scale;
+        let torch_l = 10 + (t.type === 'FCAW' ? 35 : 15);
+        t.torch_end = { x: J5_wx + Math.cos(t.angle) * torch_l * scale, y: J5_wy + Math.sin(t.angle) * torch_l * scale };
+
+        ctx.save(); ctx.translate(t.x, t.y); ctx.scale(scale, scale);
+        ctx.fillStyle = '#34495e'; ctx.fillRect(-12, -12, 24, 24); ctx.fillStyle = '#95a5a6'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+
+        let rang = 0;
+        const drawLink = (len) => { ctx.fillStyle = '#34495e'; ctx.rotate(rang); ctx.fillRect(0, -3.5, len, 7); ctx.translate(len, 0); ctx.fillStyle = spec.color; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); };
+        rang = J1; drawLink(L1); rang = J2; drawLink(L2); rang = J3; drawLink(L3);
+        ctx.fillStyle = '#34495e'; rang = J4; ctx.rotate(rang); ctx.fillRect(0, -2.5, J4L, 5); ctx.translate(J4L, 0); ctx.fillStyle = spec.color; ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fill();
+
+        ctx.rotate(t.angle - (J1+J2+J3+J4)); 
+        if (t.type === 'FCAW') { ctx.fillStyle = '#f39c12'; ctx.fillRect(5, -5, 15, 10); ctx.beginPath(); ctx.arc(10, -5, 8, 0, Math.PI*2); ctx.fillStyle = '#ecf0f1'; ctx.fill(); ctx.fillStyle = '#7f8c8d'; ctx.fillRect(20, -2.5, 10, 5); ctx.fillRect(30, -2.5, 5, 15); } 
+        else { ctx.fillStyle = '#f1c40f'; ctx.fillRect(5, -4, 15, 8); ctx.fillStyle = '#ffffff'; ctx.fillRect(20, -1, 10, 2); }
+        ctx.restore();
+
+        // ★ 로봇 HP 바 그리기
+        ctx.fillStyle = '#c0392b'; ctx.fillRect(t.x - 15, t.y + 20, 30, 4);
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(t.x - 15, t.y + 20, 30 * (t.hp / t.maxHp), 4);
+        
+        ctx.fillStyle = '#f1c40f'; ctx.font = '12px Arial bold'; ctx.fillText(`Lv.${totalLv}`, t.x - 14, t.y - 20 - (totalLv*2));
+        if (gameState.selectedTower === t) { ctx.beginPath(); ctx.arc(t.x, t.y, actualRange, 0, Math.PI * 2); ctx.strokeStyle = `rgba(255, 255, 255, 0.15)`; ctx.stroke(); }
+    }
+
+    function triggerGameOver(isQuit = false) {
+        gameState.status = 'gameover'; 
+        
+        for(let i=0; i<60; i++) {
+            particles.push({ x: 10 + Math.random()*70, y: Math.random()*650, r: 5 + Math.random()*25, color: '#2c3e50', life: 2.0, decay: 0.005, vx: (Math.random()-0.2)*15, vy: (Math.random()-0.5)*15, growth: 0, isPoly: true });
+            if(i%2==0) createFire(10 + Math.random()*60, Math.random()*650, 1.5);
+        }
+        let msg = isQuit ? "GAME ABORTED" : "SYSTEM FAILURE";
+        createFloatingText(canvas.width/2, canvas.height/2, msg, "#e74c3c", 60);
+        
+        let finalScore = gameState.quizTotal > 0 ? Math.round((gameState.quizCorrect / gameState.quizTotal) * 100) : 0;
+
+        setTimeout(() => { 
+            document.getElementById('go-wave').innerText = gameState.wave;
+            document.getElementById('go-quiz').innerText = `${gameState.quizCorrect}/${gameState.quizTotal}`;
+            document.getElementById('go-score').innerText = `${finalScore}점`;
+            
+            document.getElementById('go-score').style.color = finalScore >= 80 ? '#2ecc71' : (finalScore >= 50 ? '#f1c40f' : '#e74c3c');
+            
+            document.getElementById('gameover-overlay').style.display = 'flex';
+        }, 2000);
+    }
+
+    function createSmoke(x, y, intensity) {
+        let c = 80 - Math.floor(intensity * 50); 
+        particles.push({ x: x, y: y, r: 5 + Math.random()*10, color: `rgba(${c},${c},${c},0.7)`, life: 1.0, decay: 0.01 + Math.random()*0.01, vx: (Math.random()-0.5)*0.5, vy: -1 - Math.random()*1.5*intensity, growth: 0.2, isText: false });
+    }
+    function createFire(x, y, intensity) {
+        let colors = ['#f1c40f', '#e67e22', '#e74c3c'];
+        particles.push({ x: x, y: y, r: 8 + Math.random()*10*intensity, color: colors[Math.floor(Math.random()*colors.length)], life: 1.0, decay: 0.03 + Math.random()*0.03, vx: (Math.random()-0.5)*1.5, vy: -2 - Math.random()*2, growth: -0.2, isText: false });
+    }
+
+    function updatePlayingLogic() {
+        if (gameState.heatLv > 0 && gameState.baseHp > 0 && gameState.baseHp < gameState.baseMaxHp) {
+            gameState.regenProgress += (gameState.heatLv * 0.2); 
+            if(gameState.regenProgress >= 100) {
+                gameState.regenProgress = 0;
+                gameState.baseHp = Math.min(gameState.baseMaxHp, gameState.baseHp + 1);
+                createFloatingText(40, canvas.height/2, "+1", "#2ecc71", 20);
+            }
+        } else { gameState.regenProgress = 0; }
+
+        if (gameState.waveTimerFrames > 0) {
+            
+            // ★ 웨이브 중간(15초) 퀴즈 발동 로직
+            if (gameState.waveTimerFrames <= 15 * 60 && !gameState.midQuizTriggered) {
+                gameState.midQuizTriggered = true;
+                triggerQuiz();
+                return; // 퀴즈 창이 뜨면 이번 프레임 로직 정지
+            }
+
+            gameState.waveTimerFrames--;
+            if (gameState.frameCount % 60 === 0) updateUI();
+            
+            let spawnRate = Math.max(12, 80 - (gameState.wave * 3)); 
+            if (gameState.frameCount % spawnRate === 0) { spawnNormalEnemy(false); }
+            
+            // ★ 용착불량 분산 스폰 로직
+            if (gameState.fusionToSpawn > 0) {
+                let fusionInterval = Math.max(10, Math.floor((30 * 60) / (gameState.wave < 10 ? 10 : gameState.wave)));
+                if (gameState.waveTimerFrames % fusionInterval === 0) {
+                    spawnNormalEnemy(true); // true = 용착불량 스폰
+                    gameState.fusionToSpawn--;
+                }
+            }
+
+        } else if (!gameState.bossSpawned) {
+            updateUI(); 
+            spawnBossSwarm();
+            gameState.bossSpawned = true;
+        } else if (enemies.length === 0) {
+            startNextWave(); 
+        }
+
+        towers.forEach(t => {
+            let spec = TOWER_SPECS[t.type];
+            let actualRange = spec.range + (t.upg.voltage * 25);
+            let target = enemies.find(e => Math.hypot(e.x - t.x, e.y - t.y) < actualRange);
+            
+            if (target) {
+                t.angle += (Math.atan2(target.y - t.torch_end.y, target.x - t.torch_end.x) - t.angle) * 0.2; 
+                if (t.cooldown <= 0) {
+                    target.hp -= (spec.baseDmg + (t.upg.current * 15));
+                    let sSlow = t.upg.filler * 30;
+                    if(sSlow > 0) target.slowTimer = Math.max(target.slowTimer, sSlow);
+                    
+                    let sRad = spec.splashBase + (t.upg.gas * 20);
+                    if (sRad > 0) {
+                        let sDmg = t.upg.gas * 10;
+                        enemies.forEach(e => { if (e !== target && Math.hypot(e.x - target.x, e.y - target.y) < sRad) { e.hp -= (t.type === 'FCAW' ? (spec.baseDmg*0.5) : 0) + sDmg; if(sSlow > 0) e.slowTimer = Math.max(e.slowTimer, sSlow); } });
+                    }
+                    projectiles.push({ x: t.torch_end.x, y: t.torch_end.y, target: target, life: 3, color: spec.color });
+                    t.cooldown = spec.cd;
+                }
+            } else { t.angle += (0 - t.angle) * 0.05; }
+            t.cooldown--;
+        });
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i]; 
+            
+            if (e.bossRef && enemies.includes(e.bossRef)) {
+                e.x = e.bossRef.x + e.offsetX;
+                e.y = e.bossRef.y + e.offsetY;
+                let angle = Math.atan2(e.offsetY, e.offsetX);
+                let dist = Math.hypot(e.offsetX, e.offsetY);
+                angle += 0.06; 
+                e.offsetX = Math.cos(angle) * dist;
+                e.offsetY = Math.sin(angle) * dist;
+            } else {
+                if (e.bossRef) e.bossRef = null; 
+                let currentSpeed = e.speed;
+                if(e.slowTimer > 0) { e.slowTimer--; currentSpeed *= 0.4; }
+                e.x -= currentSpeed;
+            }
+
+            // ★ 용착불량 몬스터 로봇 충돌 자폭 로직
+            if (e.type === 'Fusion') {
+                let hitTower = towers.find(t => Math.hypot(t.x - e.x, t.y - e.y) < 30); // 충돌 반경
+                if (hitTower) {
+                    hitTower.hp -= e.dmg;
+                    createFire(e.x, e.y, 1.0);
+                    enemies.splice(i, 1);
+                    updateUI();
+                    
+                    if (hitTower.hp <= 0) {
+                        createEffect(hitTower.x, hitTower.y, '#e74c3c', 50, 1.5, 0.02); // 파괴 이펙트
+                        towers = towers.filter(t => t !== hitTower); // 로봇 철거됨 (환불 X)
+                        createFloatingText(hitTower.x, hitTower.y - 20, "ROBOT DESTROYED!", "#e74c3c", 16);
+                        closeMenus();
+                    } else {
+                        createFloatingText(hitTower.x, hitTower.y - 20, `HP -${e.dmg}`, "#e74c3c", 14);
+                    }
+                    continue; // 자폭했으므로 아래 기지 충돌 생략
+                }
+            }
+            
+            let hitTargetX = gameState.beadShield > 0 ? 95 : 80;
+            if (e.x < hitTargetX) {
+                if (gameState.beadShield > 0) { gameState.beadShield -= e.dmg; if(gameState.beadShield < 0) gameState.beadShield = 0; } 
+                else { gameState.baseHp -= Math.max(1, e.dmg - (gameState.notchLv * 2)); }
+                
+                enemies.splice(i, 1); updateUI();
+                if(gameState.baseHp <= 0) { triggerGameOver(); return; }
+                continue;
+            }
+        }
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i];
+            if(e.hp <= 0) {
+                if(e.type === 'Crack') { createEffect(e.x, e.y, '#c0392b', 80, 1.0, 0.02); }
+                gameState.resources += e.reward; updateUI(); enemies.splice(i, 1);
+            }
+        }
+    }
+
+    function updateParticleLogic() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let pt = particles[i];
+            pt.life -= pt.decay; 
+            if(pt.life <= 0) particles.splice(i, 1);
+            else {
+                pt.r += (pt.growth !== undefined) ? pt.growth : (pt.decay * 1.5);
+                if (pt.r < 0.1) pt.r = 0.1;
+                pt.x += pt.vx || 0; pt.y += pt.vy || 0;
+                if (pt.isPoly) pt.vy += 0.5; 
+            }
+        }
+    }
+
+    function gameLoop() {
+        if (gameState.status === 'paused') return;
+        
+        for(let step = 0; step < gameState.speed; step++) {
+            if(gameState.status === 'gameover') break; 
+            
+            gameState.frameCount++;
+            if (gameState.status === 'playing') updatePlayingLogic();
+            updateParticleLogic();
+        }
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(0, 0, 80, canvas.height);
+        
+        let hpRatio = gameState.baseHp / gameState.baseMaxHp;
+        let damageLevel = 1.0 - hpRatio; 
+        if (gameState.status === 'gameover') damageLevel = 1.5;
+
+        ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5;
+        baseCracks.forEach(c => {
+            if (hpRatio < c.thresh || gameState.status === 'gameover') {
+                ctx.beginPath(); ctx.moveTo(c.pts[0].x, c.pts[0].y);
+                for(let i=1; i<c.pts.length; i++) ctx.lineTo(c.pts[i].x, c.pts[i].y);
+                ctx.stroke();
+            }
+        });
+
+        if (damageLevel > 0.3 && gameState.frameCount % Math.max(1, Math.floor(10 - damageLevel*8)) === 0) createSmoke(10 + Math.random()*60, 50 + Math.random()*500, damageLevel);
+        if (damageLevel > 0.6 && gameState.frameCount % Math.max(1, Math.floor(6 - damageLevel*5)) === 0) createFire(20 + Math.random()*50, 50 + Math.random()*500, damageLevel);
+
+        ctx.fillStyle = '#ecf0f1'; ctx.font = '24px Arial bold';
+        ctx.save(); ctx.translate(45, canvas.height/2 + 80); ctx.rotate(-Math.PI/2); ctx.fillText('WELDING ZONE', 0, 0); ctx.restore();
+
+        if (gameState.beadShield > 0 && gameState.status === 'playing') {
+            ctx.fillStyle = '#e67e22'; ctx.fillRect(80, 0, 15, canvas.height);
+            ctx.fillStyle = '#d35400';
+            for(let i=0; i<canvas.height; i+=20) { ctx.beginPath(); ctx.arc(87, i, 7, 0, Math.PI*2); ctx.fill(); }
+        }
+
+        if(gameState.status === 'playing') {
+            towers.forEach(t => {
+                let spec = TOWER_SPECS[t.type];
+                let actualRange = spec.range + (t.upg.voltage * 25);
+                drawAndCalculateRobot(ctx, t, spec, actualRange);
+            });
+
+            enemies.forEach(e => {
+                drawEnemy(ctx, e);
+                ctx.fillStyle = '#c0392b'; ctx.fillRect(e.x - 15, e.y - e.radius - 20, 30, 4);
+                ctx.fillStyle = '#2ecc71'; ctx.fillRect(e.x - 15, e.y - e.radius - 20, 30 * (e.hp / e.maxHp), 4);
+            });
+        }
+
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            let p = projectiles[i];
+            if (enemies.includes(p.target)) {
+                ctx.beginPath(); ctx.moveTo(p.x, p.y);
+                let segments = 5; let dx = (p.target.x - p.x)/segments; let dy = (p.target.y - p.y)/segments;
+                for(let j=1; j<=segments; j++) { ctx.lineTo(p.x + dx*j + (j===segments?0:(Math.random()-0.5)*15), p.y + dy*j + (j===segments?0:(Math.random()-0.5)*15)); }
+                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2 + Math.random()*2; ctx.shadowBlur = 10; ctx.shadowColor = p.color; ctx.stroke(); ctx.shadowBlur = 0;
+            }
+            p.life--; if (p.life <= 0) projectiles.splice(i, 1);
+        }
+
+        particles.forEach(pt => {
+            ctx.globalAlpha = Math.max(0, pt.life);
+            ctx.fillStyle = pt.color;
+            if (pt.isText) { ctx.font = `${pt.size}px bold Arial`; ctx.fillText(pt.text, pt.x, pt.y); } 
+            else if (pt.isPoly) { ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pt.x+pt.r, pt.y+pt.r/2); ctx.lineTo(pt.x-pt.r/2, pt.y+pt.r); ctx.fill(); } 
+            else { ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill(); }
+        });
+        ctx.globalAlpha = 1.0; 
+
+        requestAnimationFrame(gameLoop);
+    }
+    
+    function createEffect(x, y, color, maxR, life = 1.0, decay = 0.05, vx=0, vy=0) { particles.push({ x: x, y: y, r: 2, maxR: maxR, color: color, life: life, decay: decay, vx:vx, vy:vy, isText: false }); }
+    function createFloatingText(x, y, text, color, size = 14) { particles.push({ x: x, y: y, text: text, color: color, life: 1.0, size: size, decay: 0.02, isText: true }); }
+
+    initGameData();
+
+    const _OX = {
+      send(type, data) {
+        try {
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type, data }));
+          }
+        } catch (e) {}
+      },
+    };
+    window._OX = _OX;
+
+    function _quizOverlayOpen() {
+      const ov = document.getElementById('quiz-overlay');
+      return !!(ov && ov.style.display === 'flex');
+    }
+
+    function _quizOverlayState() {
+      if (!_quizOverlayOpen()) return { open: false };
+      return {
+        open: true,
+        showButtons: document.getElementById('quiz-buttons').style.display !== 'none',
+        showExp: document.getElementById('quiz-exp').style.display === 'block',
+        showNext: document.getElementById('btn-next-wave').style.display === 'block',
+        expText: document.getElementById('quiz-exp').innerText || '',
+        expColor: document.getElementById('quiz-exp').style.color || '',
+      };
+    }
+
+    let _userPaused = false;
+    function _isUserPaused() {
+      return _userPaused && !_quizOverlayOpen();
+    }
+    if (typeof togglePause === 'function') {
+      const _origTogglePause = togglePause;
+      togglePause = function() {
+        _origTogglePause();
+        _userPaused = (gameState.status === 'paused') && !_quizOverlayOpen();
+      };
+      window.togglePause = togglePause;
+    }
+
+    function _oxSnapshot() {
+      const enemiesPlain = enemies.map(e => {
+        const { bossRef, ...rest } = e;
+        return rest;
+      });
+      return {
+        version: 3,
+        gameState: { ...gameState, selectedTower: null, buildTargetPos: null },
+        towers: towers.map(t => ({ ...t })),
+        enemies: enemiesPlain,
+        baseCracks: baseCracks,
+        quizBag: quizBag,
+        currentQuiz: currentQuiz || null,
+        quizOverlay: _quizOverlayState(),
+        userPaused: _userPaused,
+        savedAt: Date.now(),
+      };
+    }
+    window._oxSnapshot = _oxSnapshot;
+
+    function _oxRestore(snap) {
+      try {
+        if (!snap || !snap.gameState) return false;
+        gameState = snap.gameState;
+        gameState.selectedTower = null;
+        gameState.buildTargetPos = null;
+        towers = (snap.towers || []).map(t => ({ ...t }));
+        enemies = (snap.enemies || []).map(e => ({ ...e, bossRef: null }));
+        baseCracks = snap.baseCracks || baseCracks;
+        quizBag = snap.quizBag || quizBag;
+        currentQuiz = snap.currentQuiz || null;
+        _userPaused = !!snap.userPaused;
+        projectiles = []; particles = [];
+
+        const qov = snap.quizOverlay;
+        if (qov && qov.open && currentQuiz) {
+          document.getElementById('quiz-cat-ui').innerText = '[ ' + currentQuiz.cat + ' ]';
+          document.getElementById('quiz-text').innerText = "Q. " + currentQuiz.q;
+          document.getElementById('quiz-buttons').style.display = qov.showButtons ? 'block' : 'none';
+          document.getElementById('quiz-exp').innerText = qov.expText || '';
+          if (qov.expColor) document.getElementById('quiz-exp').style.color = qov.expColor;
+          document.getElementById('quiz-exp').style.display = qov.showExp ? 'block' : 'none';
+          document.getElementById('btn-next-wave').style.display = qov.showNext ? 'block' : 'none';
+          document.getElementById('quiz-overlay').style.display = 'flex';
+          gameState.status = 'paused';
+        } else if (_userPaused) {
+          gameState.status = 'paused';
+          document.getElementById('btn-playpause').innerText = '▶ 계속하기';
+        }
+        updateUI();
+        return true;
+      } catch (e) {
+        _OX.send('error', { msg: 'restore failed: ' + e.message });
+        return false;
+      }
+    }
+
+    function _oxPushStatus() {
+      _OX.send('status', {
+        wave: gameState.wave,
+        baseHp: Math.floor(gameState.baseHp),
+        baseMaxHp: gameState.baseMaxHp,
+        resources: gameState.resources,
+        quizCorrect: gameState.quizCorrect,
+        quizTotal: gameState.quizTotal,
+        status: gameState.status,
+        userPaused: _isUserPaused(),
+      });
+    }
+
+    const _origUpdateUI = updateUI;
+    updateUI = function() { _origUpdateUI(); _oxPushStatus(); };
+
+    triggerGameOver = function(isQuit = false) {
+      if (gameState.status === 'gameover') return;
+      gameState.status = 'gameover';
+      _userPaused = false;
+      _OX.send('gameover', {
+        finalWave: gameState.wave,
+        quizCorrect: gameState.quizCorrect,
+        quizTotal: gameState.quizTotal,
+        isQuit: !!isQuit,
+      });
+    };
+
+    window.addEventListener('message', function(ev) { _oxHandle(ev.data); });
+    document.addEventListener('message', function(ev) { _oxHandle(ev.data); });
+    function _oxHandle(raw) {
+      let msg;
+      try { msg = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return; }
+      if (!msg || !msg.type) return;
+      const ackId = msg.ackId;
+      if (msg.type === 'getExitInfo') {
+        _OX.send('exitInfo', {
+          ackId,
+          wasUserPaused: _isUserPaused(),
+          snapshot: _oxSnapshot(),
+        });
+      } else if (msg.type === 'reset') {
+        // [다시하기] → 게임 안내 화면으로 돌아가기.
+        // 사용자가 [게임시작]을 누를 때까지 wave 시작/quiz 트리거 안 함.
+        document.getElementById('quiz-overlay').style.display = 'none';
+        document.getElementById('gameover-overlay').style.display = 'none';
+        document.getElementById('intro-overlay').style.display = 'flex';
+        _userPaused = false;
+        initGameData(); // status = 'standby'
+      } else if (msg.type === 'quit') {
+        triggerGameOver(true);
+      }
+    }
+
+    window.__oxBoot = function() {
+      try {
+        const restored = (typeof window.__OX_INITIAL_STATE !== 'undefined' && window.__OX_INITIAL_STATE)
+          ? _oxRestore(window.__OX_INITIAL_STATE) : false;
+        if (restored) {
+          // 이어하기: 저장된 상태 복원 후 바로 게임 진행
+          document.getElementById('intro-overlay').style.display = 'none';
+        } else {
+          // 신규 시작: 인트로 화면 표시, 사용자가 [게임시작] 누를 때까지 대기.
+          // initGameData()는 status='standby'로 두고 wave/quiz를 트리거하지 않음.
+          initGameData();
+          document.getElementById('intro-overlay').style.display = 'flex';
+          _userPaused = false;
+        }
+        _OX.send('ready', { restored });
+        if (gameState.status === 'playing') requestAnimationFrame(gameLoop);
+      } catch (e) {
+        _OX.send('error', { msg: 'boot failed: ' + e.message });
+      }
+    };
+
+    setTimeout(function() { window.__oxBoot(); }, 50);
+
+</script>
+</body>
+</html>

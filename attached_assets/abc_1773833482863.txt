@@ -1,0 +1,606 @@
+================================================================================
+AI 용접 진단 시스템 - 히트맵 좌표 버그 수정 코드
+================================================================================
+
+【버그 원인 분석】
+
+원인 1 (가장 큰 원인): AI 프롬프트에서 동일 이미지를 high/low 두 장 전송하고
+  "두 번째 이미지 기준으로 좌표 보고"라고 지시하지만, GPT-4o는 같은 이미지 두 장을
+  구분하지 못하여 좌표 기준점이 혼란됨. 특히 detail:"low"로 보내면 GPT-4o 내부에서
+  512x512 영역에 맞추면서 비정사각형 이미지에 패딩이 추가되어 좌표가 틀어짐.
+
+원인 2: 좌표 그리드가 5×5로 너무 거칠어서 (36개 교차점만 가능) 정밀한 위치 지정 불가.
+
+원인 3: 측면/이면 사진이 추가되면 이미지 순서가 바뀌는데, AI가 "두 번째 이미지"를
+  잘못 참조하여 엉뚱한 이미지 기준으로 좌표를 보고.
+
+원인 4 (클라이언트): heatmapContainerW가 0일 때 SCREEN_W - 32를 폴백으로 사용하지만,
+  실제 컨테이너 폭은 SectionCard 패딩(16*2) + 콘텐츠 패딩(16*2)을 빼야 하므로
+  초기 렌더링 시 마커 위치가 어긋남.
+
+원인 5 (클라이언트): 마커 위치가 이미지 영역 밖으로 벗어나는 것을 방지하는
+  boundary clamping 로직이 없음.
+
+================================================================================
+수정해야 할 파일 2개:
+1. server/weld-analysis.ts (서버 사이드 - AI 프롬프트 및 이미지 전송 수정)
+2. app/diagnosis/[id].tsx (클라이언트 사이드 - 히트맵 오버레이 수정)
+================================================================================
+
+
+################################################################################
+# FILE: server/weld-analysis.ts (전체 수정 코드)
+################################################################################
+
+import OpenAI from "openai";
+import type { Express, Request, Response } from "express";
+import express from "express";
+import pool from "./db";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+const largeBodyParser = express.json({ limit: "30mb" });
+
+const DEFECT_CRITERIA = `【6대 결함 판단 기준】
+1. 균열 (Crack): 비드 표면이나 모재 경계선(Toe)의 선형 갈라짐
+2. 기공 (Porosity): 비드 표면의 작고 둥근 구멍 (바늘 자국, 기포 형태)
+3. 언더컷 (Undercut): 비드 가장자리(Toe) 모재가 깊게 파인 홈
+4. 오버랩 (Overlap): 용접 금속이 모재 위로 흘러넘쳐 덮인 상태
+5. 스패터 (Spatter): 비드 주변 모재에 흩뿌려진 금속 방울
+6. 아크 스트라이크 (Arc Strike): 비드 밖 모재의 불규칙한 긁힘/녹은 자국`;
+
+// ★ 수정: 좌표 지시문 완전 재작성 - 이중 이미지 참조 제거, 10x10 그리드, 명확한 앵커링
+const COORDINATE_INSTRUCTION = `【결함 위치 좌표 - 정확한 위치 보고 필수】
+defectLocations 좌표는 제공된 사진 기준 백분율(%)로 보고합니다.
+이미지는 1장만 제공되며, 그 이미지를 기준으로 좌표를 산출하십시오.
+
+■ 좌표 체계:
+- x: 이미지 왼쪽 끝 = 0, 오른쪽 끝 = 100 (가로 위치 %)
+- y: 이미지 위쪽 끝 = 0, 아래쪽 끝 = 100 (세로 위치 %)
+
+■ 좌표 추정 방법 (반드시 따를 것):
+1단계: 이미지를 가로 10등분, 세로 10등분하여 10×10 격자(총 100칸)로 나눕니다.
+        각 칸의 크기는 이미지 전체의 10% × 10%입니다.
+2단계: 비드(용접선)가 이미지의 어느 영역을 지나가는지 먼저 파악합니다.
+3단계: 결함이 비드의 어느 부분에 위치하는지 해당 격자 칸의 중심 좌표로 보고합니다.
+
+■ 좌표 예시:
+  - 이미지 왼쪽 상단 모서리 = {"x": 5, "y": 5}
+  - 이미지 정중앙 = {"x": 50, "y": 50}
+  - 이미지 오른쪽 하단 = {"x": 95, "y": 95}
+  - 이미지 왼쪽 1/4 지점, 세로 중앙 = {"x": 25, "y": 50}
+  - 이미지 오른쪽 3/4 지점, 상단 1/3 = {"x": 75, "y": 33}
+
+■ 주의사항:
+- detected:true인 결함만 defectLocations에 포함
+- 같은 종류의 결함이 여러 곳에 있으면 각각 별도 항목으로 추가
+- 결함의 정확한 위치를 특정할 수 없으면 해당 결함은 defectLocations에서 생략 (추측 금지)
+- 비드(용접선)가 이미지의 어디에 있는지 먼저 파악한 후, 그 위의 결함 좌표를 보고
+- x, y 값은 반드시 0~100 범위의 정수로 보고`;
+
+const DEFECTS_SCHEMA = `"defects": [
+    {"name":"균열 (Crack)","detected":<bool>,"severity":"없음|경미|보통|심각","confidence":<0-100>,"standard":"선급","measured":"<관찰값>","limit":"불허","result":"합격|불합격|경고"},
+    {"name":"기공 (Porosity)","detected":<bool>,"severity":"없음|경미|보통|심각","confidence":<0-100>,"standard":"선급","measured":"<관찰값>","limit":"불허","result":"합격|불합격|경고"},
+    {"name":"언더컷 (Undercut)","detected":<bool>,"severity":"없음|경미|보통|심각","confidence":<0-100>,"standard":"선급","measured":"<관찰값>","limit":"0.5mm","result":"합격|불합격|경고"},
+    {"name":"오버랩 (Overlap)","detected":<bool>,"severity":"없음|경미|보통|심각","confidence":<0-100>,"standard":"선급","measured":"<관찰값>","limit":"불허","result":"합격|불합격|경고"},
+    {"name":"스패터 (Spatter)","detected":<bool>,"severity":"없음|경미|보통|심각","confidence":<0-100>,"standard":"선급","measured":"<관찰값>","limit":"경미허용","result":"합격|불합격|경고"},
+    {"name":"아크 스트라이크 (Arc Strike)","detected":<bool>,"severity":"없음|경미|보통|심각","confidence":<0-100>,"standard":"선급","measured":"<관찰값>","limit":"불허","result":"합격|불합격|경고"}
+  ]`;
+
+// ★ 수정: SYSTEM_PROMPT - "이미지 두 장" 참조 제거, 단일 이미지 기준으로 변경
+const SYSTEM_PROMPT = `당신은 20년 이상의 경력을 가진 국제 공인 용접 검사관(CWI) 수준의 AI 비전 분석 전문가입니다.
+제공된 용접 비드(Welding Bead) 표면 사진을 정밀하게 육안 검사하여 이상적인 용접 상태와 비교하고, 결함을 찾아내어 그 위치와 종류를 정확히 보고하십시오.
+
+【측정자 활용】
+- 측정자가 있으면 mm 눈금으로 정확한 수치 측정
+- 없으면 비드폭/직진도/피치 수치 뒤에 "(추정)" 기재
+- 측면 사진이 없으면 비드 높이 뒤에 "(추정)" 기재
+
+【비드 형상 기준】
+- 비드 폭(Width): 편차 1mm미만→양호, 2mm미만→주의, 2mm이상→불량
+- 비드 높이(Height): 2mm미만→양호, 3mm미만→주의, 3mm이상→불량
+- 직진도(Straightness): 1mm미만→양호, 2mm미만→주의, 2mm이상→불량
+- 피치 균일도(Pitch): 일정→양호, 2회이상불일정→주의, 3회이상→불량
+
+${DEFECT_CRITERIA}
+
+${COORDINATE_INSTRUCTION}
+
+반드시 유효한 JSON만 응답:
+{
+  "aiScore": <0-100 정수>,
+  "overallVerdict": "PASS"|"FAIL",
+  "beadAnalysis": {
+    "totalScore": <0-100>,
+    "width": {"value":"<최대Xmm/최소Xmm(추정)>","score":<0-100>,"result":"양호|주의|불량"},
+    "height": {"value":"<Xmm(추정)>","score":<0-100>,"result":"양호|주의|불량"},
+    "straightness": {"value":"<±Xmm(추정)>","score":<0-100>,"result":"양호|주의|불량"},
+    "pitchUniformity": {"value":"<Xmm(추정)>","score":<0-100>,"result":"양호|주의|불량"}
+  },
+  ${DEFECTS_SCHEMA},
+  "defectLocations": [
+    {"name":"<defects배열의name과동일>","x":<0-100 정수>,"y":<0-100 정수>}
+  ],
+  "improvements": ["<개선사항1>","<훈련가이드>","<추가조언>"],
+  "comprehensiveReport": "<이번+이전이력 종합 강점/약점/기량추이, 200자이상>",
+  "top3Defects": ["<가장심각한결함명>"]
+}
+
+평가: A(90+), B(80-89), C(70-79), D(60-69), F(60미만). PASS:70이상`;
+
+// ★ 수정: PER_PHOTO_SYSTEM_PROMPT - "이미지 두 장" 참조 제거
+const PER_PHOTO_SYSTEM_PROMPT = `당신은 용접 검사관 AI입니다. 단일 용접 사진을 분석하여 결함과 비드 형상을 정밀 평가하고 결함 위치를 정확히 보고하십시오.
+
+${DEFECT_CRITERIA}
+
+${COORDINATE_INSTRUCTION}
+
+반드시 유효한 JSON만 응답:
+{
+  "beadAnalysis": {
+    "totalScore": <0-100>,
+    "width": {"value":"...","score":<0-100>,"result":"양호|주의|불량"},
+    "height": {"value":"...","score":<0-100>,"result":"양호|주의|불량"},
+    "straightness": {"value":"...","score":<0-100>,"result":"양호|주의|불량"},
+    "pitchUniformity": {"value":"...","score":<0-100>,"result":"양호|주의|불량"}
+  },
+  ${DEFECTS_SCHEMA},
+  "defectLocations": [
+    {"name":"<defects배열의name과동일>","x":<0-100 정수>,"y":<0-100 정수>}
+  ]
+}`;
+
+type ImageContent = {
+  type: "image_url";
+  image_url: { url: string; detail: "high" | "low" };
+};
+type TextContent = { type: "text"; text: string };
+type MessageContent = ImageContent | TextContent;
+
+function photoContent(base64: string, detail: "high" | "low"): ImageContent {
+  return { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail } };
+}
+
+// ★ 수정: buildUserMessage - 정면 이미지 1장만 전송 (low 복제본 제거)
+function buildUserMessage(params: {
+  process: string;
+  posture: string;
+  material: string;
+  selfScore: number;
+  plateThickness?: string;
+  photos: { front: string; side?: string; back?: string };
+  previousResultsSummary?: string;
+  adminFeedback?: string;
+}): MessageContent[] {
+  const content: MessageContent[] = [];
+
+  // ★ 핵심 수정: 정면 사진 1장만 high detail로 전송 (기존: high + low 2장 전송하여 혼란 유발)
+  content.push(photoContent(params.photos.front, "high"));
+
+  if (params.photos.side) content.push(photoContent(params.photos.side, "high"));
+  if (params.photos.back) content.push(photoContent(params.photos.back, "high"));
+
+  // ★ 수정: 이미지 순서 설명 - "두 번째=전체뷰(좌표기준)" 제거
+  let imageCount = 1;
+  let photoOrder = "1번=정면";
+  if (params.photos.side) { imageCount++; photoOrder += `, ${imageCount}번=측면`; }
+  if (params.photos.back) { imageCount++; photoOrder += `, ${imageCount}번=이면`; }
+
+  let text = `【용접 정보】공정:${params.process} / 자세:${params.posture} / 소재:${params.material} / 자체점수:${params.selfScore}점`;
+  if (params.plateThickness) text += ` / 부재두께:${params.plateThickness}mm`;
+  text += `\n【이미지】총 ${imageCount}장 (${photoOrder})`;
+  // ★ 수정: "두 번째 이미지 기준" 대신 "정면 사진(1번 이미지) 기준"으로 명시
+  text += `\n※ defectLocations 좌표는 반드시 정면 사진(1번 이미지) 기준으로, 이미지 왼쪽끝=x:0, 오른쪽끝=x:100, 위쪽끝=y:0, 아래쪽끝=y:100 백분율로 보고하십시오.`;
+  if (params.adminFeedback) text += `\n\n【관리자 추가 검사기준 - 반드시 적용】\n${params.adminFeedback}`;
+  if (params.previousResultsSummary) text += `\n\n【이전 이력 (comprehensiveReport에 반영)】\n${params.previousResultsSummary}`;
+  else text += `\n\n【이전 이력】 첫 번째 업로드입니다.`;
+  text += `\n\n위 용접 사진을 정밀 분석하십시오. 반드시 JSON만 응답하십시오.`;
+
+  content.push({ type: "text", text });
+  return content;
+}
+
+// ★ 수정: buildPerPhotoMessage - 이미지 1장만 전송 (low 복제본 제거)
+function buildPerPhotoMessage(params: {
+  photoBase64: string;
+  photoLabel: string;
+  process: string;
+  posture: string;
+  plateThickness?: string;
+}): MessageContent[] {
+  return [
+    // ★ 핵심 수정: 1장만 전송 (기존: high + low 2장 전송)
+    photoContent(params.photoBase64, "high"),
+    {
+      type: "text",
+      // ★ 수정: "두 번째 이미지(전체뷰) 기준" 제거 → "이 이미지 기준"으로 변경
+      text: `【분석 대상】${params.photoLabel} 사진\n【용접 정보】공정:${params.process} / 자세:${params.posture}${params.plateThickness ? ` / 부재두께:${params.plateThickness}mm` : ""}\n\n이 사진을 분석하십시오. defectLocations 좌표는 이 이미지 기준으로 왼쪽끝=x:0, 오른쪽끝=x:100, 위쪽끝=y:0, 아래쪽끝=y:100 백분율로 정확하게 보고하십시오. 반드시 JSON만 응답하십시오.`,
+    },
+  ];
+}
+
+function applyBeadWidthThreshold(value: string): "양호" | "주의" | "불량" {
+  const maxMatch = value.match(/최대\s*([\d.]+)/);
+  const minMatch = value.match(/최소\s*([\d.]+)/);
+  if (maxMatch && minMatch) {
+    const diff = parseFloat(maxMatch[1]) - parseFloat(minMatch[1]);
+    if (diff < 1) return "양호"; if (diff < 2) return "주의"; return "불량";
+  }
+  const m = value.match(/([\d.]+)\s*mm/);
+  if (m) { const v = parseFloat(m[1]); if (v < 1) return "양호"; if (v < 2) return "주의"; return "불량"; }
+  return "주의";
+}
+
+function applyStraightnessThreshold(value: string): "양호" | "주의" | "불량" {
+  const m = value.match(/[±+]?\s*([\d.]+)/);
+  if (m) { const d = parseFloat(m[1]); if (d < 1) return "양호"; if (d < 2) return "주의"; return "불량"; }
+  return "주의";
+}
+
+// ★ 수정: parseDefectLocations - 정수 반올림 추가
+function parseDefectLocations(raw: any[]): { name: string; x: number; y: number }[] {
+  return raw
+    .map((loc: any) => {
+      const xNum = parseFloat(String(loc.x));
+      const yNum = parseFloat(String(loc.y));
+      return {
+        name: String(loc.name ?? ""),
+        // ★ 수정: Math.round 추가하여 정수 좌표로 정규화
+        x: Math.round(Math.min(100, Math.max(0, isNaN(xNum) ? 50 : xNum))),
+        y: Math.round(Math.min(100, Math.max(0, isNaN(yNum) ? 50 : yNum))),
+      };
+    })
+    .filter((loc) => loc.name.length > 0);
+}
+
+function fixDefects(defectsRaw: any[]): any[] {
+  const LIMITS: Record<string, string> = {
+    "균열": "불허", "기공": "불허", "언더컷": "0.5mm",
+    "오버랩": "불허", "스패터": "경미허용", "아크": "불허",
+  };
+  return defectsRaw.map((d: any) => {
+    const key = Object.keys(LIMITS).find((k) => d.name?.includes(k));
+    return { ...d, standard: "선급", limit: key ? LIMITS[key] : d.limit };
+  });
+}
+
+const FALLBACK_DEFECTS = [
+  { name: "균열 (Crack)", detected: false, severity: "없음", confidence: 70, standard: "선급", measured: "없음", limit: "불허", result: "합격" },
+  { name: "기공 (Porosity)", detected: false, severity: "없음", confidence: 70, standard: "선급", measured: "없음", limit: "불허", result: "합격" },
+  { name: "언더컷 (Undercut)", detected: false, severity: "없음", confidence: 70, standard: "선급", measured: "없음", limit: "0.5mm", result: "합격" },
+  { name: "오버랩 (Overlap)", detected: false, severity: "없음", confidence: 70, standard: "선급", measured: "없음", limit: "불허", result: "합격" },
+  { name: "스패터 (Spatter)", detected: false, severity: "없음", confidence: 70, standard: "선급", measured: "없음", limit: "경미허용", result: "합격" },
+  { name: "아크 스트라이크 (Arc Strike)", detected: false, severity: "없음", confidence: 70, standard: "선급", measured: "없음", limit: "불허", result: "합격" },
+];
+
+function buildFallbackResult(selfScore: number) {
+  const base = Math.min(100, Math.max(0, Math.round(selfScore * 0.85 + 10)));
+  return {
+    aiScore: base,
+    overallVerdict: base >= 70 ? "PASS" : "FAIL",
+    beadAnalysis: {
+      totalScore: base,
+      width: { value: "측정 불가(추정)", score: base, result: "주의" },
+      height: { value: "측정 불가(추정)", score: base, result: "주의" },
+      straightness: { value: "±1.0mm(추정)", score: base, result: "주의" },
+      pitchUniformity: { value: "측정 불가(추정)", score: base, result: "주의" },
+    },
+    defects: FALLBACK_DEFECTS,
+    defectLocations: [],
+    improvements: ["사진을 다시 업로드하여 더 정확한 AI 분석을 받아보세요."],
+    comprehensiveReport: "분석 중 오류가 발생했습니다. 사진을 다시 업로드하여 분석을 받아보세요.",
+    top3Defects: [],
+    photoAnalyses: null,
+  };
+}
+
+interface PerPhotoAnalysis {
+  beadAnalysis: {
+    totalScore: number;
+    width: { value: string; score: number; result: string };
+    height: { value: string; score: number; result: string };
+    straightness: { value: string; score: number; result: string };
+    pitchUniformity: { value: string; score: number; result: string };
+  };
+  defects: any[];
+  defectLocations: { name: string; x: number; y: number }[];
+}
+
+async function analyzePerPhoto(params: {
+  photoBase64: string;
+  photoLabel: string;
+  process: string;
+  posture: string;
+  plateThickness?: string;
+}): Promise<PerPhotoAnalysis> {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 2000,
+    messages: [
+      { role: "system", content: PER_PHOTO_SYSTEM_PROMPT },
+      { role: "user", content: buildPerPhotoMessage(params) as any },
+    ],
+  });
+
+  const content = response.choices[0]?.message?.content ?? "";
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("JSON 추출 실패");
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  const widthRaw = parsed.beadAnalysis?.width ?? { value: "측정불가(추정)", score: 50, result: "주의" };
+  const straightnessRaw = parsed.beadAnalysis?.straightness ?? { value: "±1.0mm(추정)", score: 50, result: "주의" };
+  widthRaw.result = applyBeadWidthThreshold(widthRaw.value);
+  straightnessRaw.result = applyStraightnessThreshold(straightnessRaw.value);
+
+  const defects = fixDefects(parsed.defects ?? FALLBACK_DEFECTS);
+  const defectLocations = Array.isArray(parsed.defectLocations)
+    ? parseDefectLocations(parsed.defectLocations)
+    : [];
+  console.log(`[${params.photoLabel}] 좌표:`, JSON.stringify(defectLocations));
+
+  return {
+    beadAnalysis: {
+      totalScore: Math.min(100, Math.max(0, Math.round(parsed.beadAnalysis?.totalScore ?? 50))),
+      width: widthRaw,
+      height: parsed.beadAnalysis?.height ?? { value: "측정불가(추정)", score: 50, result: "주의" },
+      straightness: straightnessRaw,
+      pitchUniformity: parsed.beadAnalysis?.pitchUniformity ?? { value: "측정불가(추정)", score: 50, result: "주의" },
+    },
+    defects,
+    defectLocations,
+  };
+}
+
+export function registerWeldAnalysisRoute(app: Express): void {
+  app.post("/api/analyze-weld", largeBodyParser, async (req: Request, res: Response) => {
+    const { photos, imageBase64, process, posture, material, selfScore, previousResultsSummary, plateThickness } = req.body;
+
+    const frontPhoto = photos?.front || imageBase64;
+    if (!frontPhoto) return res.status(400).json({ error: "정면 사진(front)이 필요합니다." });
+
+    try {
+      let adminFeedback: string | undefined;
+      try {
+        const fbRows = await pool.query("SELECT feedback_text FROM admin_feedback ORDER BY created_at DESC LIMIT 30");
+        if (fbRows.rows.length > 0) {
+          adminFeedback = fbRows.rows.map((r: any, i: number) => `${i + 1}. ${r.feedback_text}`).join("\n");
+        }
+      } catch {}
+
+      const procStr = process || "FCAW";
+      const postStr = posture || "1G";
+      const matStr = material || "탄소강 평판";
+      const thick = plateThickness || undefined;
+
+      const [mainResponse, sideAnalysis, backAnalysis] = await Promise.all([
+        openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 4000,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: buildUserMessage({
+                process: procStr, posture: postStr, material: matStr,
+                selfScore: selfScore ?? 50, plateThickness: thick,
+                photos: { front: frontPhoto, side: photos?.side, back: photos?.back },
+                previousResultsSummary, adminFeedback,
+              }) as any,
+            },
+          ],
+        }),
+        photos?.side
+          ? analyzePerPhoto({ photoBase64: photos.side, photoLabel: "측면", process: procStr, posture: postStr, plateThickness: thick })
+            .catch((e) => { console.error("측면 분석 오류:", e); return null; })
+          : null,
+        photos?.back
+          ? analyzePerPhoto({ photoBase64: photos.back, photoLabel: "이면", process: procStr, posture: postStr })
+            .catch((e) => { console.error("이면 분석 오류:", e); return null; })
+          : null,
+      ]);
+
+      const content = mainResponse.choices[0]?.message?.content ?? "";
+      console.log("정면 AI 응답 (앞 500자):", content.slice(0, 500));
+
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error("GPT 응답 JSON 추출 실패:", content.slice(0, 200));
+        return res.json(buildFallbackResult(selfScore ?? 50));
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      const widthRaw = parsed.beadAnalysis?.width ?? { value: "측정불가(추정)", score: 50, result: "주의" };
+      const straightnessRaw = parsed.beadAnalysis?.straightness ?? { value: "±1.0mm(추정)", score: 50, result: "주의" };
+      widthRaw.result = applyBeadWidthThreshold(widthRaw.value);
+      straightnessRaw.result = applyStraightnessThreshold(straightnessRaw.value);
+
+      const fixedDefects = fixDefects(parsed.defects ?? FALLBACK_DEFECTS);
+
+      const frontLocations = Array.isArray(parsed.defectLocations)
+        ? parseDefectLocations(parsed.defectLocations)
+        : [];
+      console.log("정면 좌표:", JSON.stringify(frontLocations));
+
+      const frontAnalysis: PerPhotoAnalysis = {
+        beadAnalysis: {
+          totalScore: Math.min(100, Math.max(0, Math.round(parsed.beadAnalysis?.totalScore ?? 50))),
+          width: widthRaw,
+          height: parsed.beadAnalysis?.height ?? { value: "측정불가(추정)", score: 50, result: "주의" },
+          straightness: straightnessRaw,
+          pitchUniformity: parsed.beadAnalysis?.pitchUniformity ?? { value: "측정불가(추정)", score: 50, result: "주의" },
+        },
+        defects: fixedDefects,
+        defectLocations: frontLocations,
+      };
+
+      const photoAnalyses: Record<string, PerPhotoAnalysis> = { front: frontAnalysis };
+      if (sideAnalysis) photoAnalyses.side = sideAnalysis;
+      if (backAnalysis) photoAnalyses.back = backAnalysis;
+
+      const result = {
+        aiScore: Math.min(100, Math.max(0, Math.round(parsed.aiScore ?? 50))),
+        overallVerdict: parsed.overallVerdict === "PASS" ? "PASS" : "FAIL",
+        beadAnalysis: frontAnalysis.beadAnalysis,
+        defects: fixedDefects,
+        defectLocations: frontLocations,
+        photoAnalyses,
+        improvements: Array.isArray(parsed.improvements) ? parsed.improvements : ["분석 데이터를 확인해주세요."],
+        comprehensiveReport: parsed.comprehensiveReport ?? "",
+        top3Defects: Array.isArray(parsed.top3Defects) ? parsed.top3Defects : [],
+      };
+
+      res.json(result);
+    } catch (err) {
+      console.error("용접 AI 분석 오류:", err);
+      res.json(buildFallbackResult(selfScore ?? 50));
+    }
+  });
+}
+
+
+################################################################################
+# FILE: app/diagnosis/[id].tsx (히트맵 관련 부분만 수정)
+################################################################################
+
+# 아래는 diagnosis/[id].tsx 파일에서 수정이 필요한 부분들입니다.
+# ★ 표시가 있는 부분이 변경된 코드입니다.
+
+# ──────────────────────────────────────────────
+# 수정 1: defectMarkers useMemo (기존 코드를 이 코드로 교체)
+# ──────────────────────────────────────────────
+
+# 【기존 코드 - 삭제할 부분】
+#  const defectMarkers = useMemo(() => {
+#    if (!imgNaturalSize || !currentPhotoAnalysis) return [];
+#    const MARKER = 44;
+#    const W = heatmapDisplayW;
+#    const H = Math.round(W / (imgNaturalSize.width / imgNaturalSize.height));
+#    return (currentPhotoAnalysis.defectLocations ?? []).map((loc) => {
+#      const defect = currentPhotoAnalysis.defects.find(
+#        (d) => d.name === loc.name || d.name.includes(loc.name.split(" ")[0])
+#      );
+#      return {
+#        key: `${loc.name}-${loc.x}-${loc.y}`,
+#        shortName: loc.name.split(" ")[0],
+#        color: defect?.severity === "심각" ? Colors.danger : Colors.warning,
+#        left: (loc.x / 100) * W - MARKER / 2,
+#        top: (loc.y / 100) * H - MARKER / 2,
+#      };
+#    });
+#  }, [imgNaturalSize, heatmapDisplayW, currentPhotoAnalysis]);
+
+# 【수정된 코드 - 이 코드로 교체】
+
+  const defectMarkers = useMemo(() => {
+    // ★ 수정: heatmapContainerW > 0 조건 추가 - 레이아웃 측정 전에는 마커를 렌더링하지 않음
+    if (!imgNaturalSize || !currentPhotoAnalysis || heatmapContainerW <= 0) return [];
+    const MARKER = 44;
+    const W = heatmapDisplayW;
+    const H = Math.round(W / (imgNaturalSize.width / imgNaturalSize.height));
+    return (currentPhotoAnalysis.defectLocations ?? []).map((loc) => {
+      const defect = currentPhotoAnalysis.defects.find(
+        (d) => d.name === loc.name || d.name.includes(loc.name.split(" ")[0])
+      );
+      // ★ 수정: 마커 위치를 이미지 영역 내로 클램핑 (boundary clamping)
+      const rawLeft = (loc.x / 100) * W - MARKER / 2;
+      const rawTop = (loc.y / 100) * H - MARKER / 2;
+      return {
+        key: `${loc.name}-${loc.x}-${loc.y}`,
+        shortName: loc.name.split(" ")[0],
+        color: defect?.severity === "심각" ? Colors.danger : Colors.warning,
+        left: Math.max(0, Math.min(rawLeft, W - MARKER)),
+        top: Math.max(0, Math.min(rawTop, H - MARKER)),
+      };
+    });
+  // ★ 수정: heatmapContainerW를 의존성 배열에 추가
+  }, [imgNaturalSize, heatmapDisplayW, heatmapContainerW, currentPhotoAnalysis]);
+
+
+# ──────────────────────────────────────────────
+# 수정 2: ExpoImage의 contentFit 변경 (히트맵 섹션 내)
+# ──────────────────────────────────────────────
+
+# 【기존 코드】
+#                    <ExpoImage
+#                      source={{ uri: selectedPhotoUri }}
+#                      style={{ width: heatmapDisplayW, aspectRatio: imgAspectRatio }}
+#                      contentFit="fill"
+#                      onLoad={(e: any) => {
+#                        const w = e?.source?.width;
+#                        const h = e?.source?.height;
+#                        if (w && h) setImgNaturalSize({ width: w, height: h });
+#                      }}
+#                    />
+
+# 【수정된 코드】
+
+                    <ExpoImage
+                      source={{ uri: selectedPhotoUri }}
+                      // ★ 수정: aspectRatio 대신 명시적 height 사용하여 overlay와 정확히 일치
+                      style={{ width: heatmapDisplayW, height: heatmapDisplayH }}
+                      // ★ 수정: "fill" → "cover"로 변경하여 이미지가 영역을 정확히 채우도록 함
+                      contentFit="cover"
+                      onLoad={(e: any) => {
+                        const w = e?.source?.width;
+                        const h = e?.source?.height;
+                        if (w && h) setImgNaturalSize({ width: w, height: h });
+                      }}
+                    />
+
+
+# ──────────────────────────────────────────────
+# 수정 3: heatmapDisplayW 폴백 값 수정
+# ──────────────────────────────────────────────
+
+# 【기존 코드】
+#  const heatmapDisplayW = heatmapContainerW > 0 ? heatmapContainerW : SCREEN_W - 32;
+
+# 【수정된 코드】
+  // ★ 수정: 폴백 값을 실제 레이아웃에 맞게 수정 (content padding 16*2 + card padding 16*2 + border 2)
+  const heatmapDisplayW = heatmapContainerW > 0 ? heatmapContainerW : SCREEN_W - 66;
+
+
+================================================================================
+수정 요약
+================================================================================
+
+【서버 사이드 (server/weld-analysis.ts)】
+1. COORDINATE_INSTRUCTION 완전 재작성
+   - "이미지 두 장" 참조 제거 → "이미지 1장 기준"으로 변경
+   - 5×5 그리드 → 10×10 그리드 (100칸)로 정밀도 향상
+   - 좌표 추정 3단계 절차 추가 (비드 위치 파악 → 결함 위치 파악)
+   - 좌표 예시 5개 추가하여 AI의 좌표 이해도 향상
+   - x, y 값을 0~100 범위의 정수로 보고하도록 명시
+
+2. buildUserMessage 수정
+   - 정면 이미지를 high + low 2장 전송 → high 1장만 전송
+   - "두 번째 이미지(전체뷰) 기준" → "정면 사진(1번 이미지) 기준"으로 변경
+   - 이미지 순서 설명을 동적으로 생성
+
+3. buildPerPhotoMessage 수정
+   - high + low 2장 전송 → high 1장만 전송
+   - "두 번째 이미지(전체뷰) 기준" → "이 이미지 기준"으로 변경
+
+4. parseDefectLocations 수정
+   - Math.round() 추가하여 소수점 좌표를 정수로 정규화
+
+【클라이언트 사이드 (app/diagnosis/[id].tsx)】
+1. defectMarkers useMemo 수정
+   - heatmapContainerW > 0 조건 추가 → 레이아웃 측정 전 렌더링 방지
+   - boundary clamping 추가 → 마커가 이미지 밖으로 벗어나지 않도록 제한
+   - heatmapContainerW를 의존성 배열에 추가
+
+2. ExpoImage 속성 수정
+   - style: aspectRatio → 명시적 height로 변경 (overlay와 정확히 일치)
+   - contentFit: "fill" → "cover"로 변경
+
+3. heatmapDisplayW 폴백 수정
+   - SCREEN_W - 32 → SCREEN_W - 66 (실제 레이아웃 반영)
+
+================================================================================
+END
+================================================================================

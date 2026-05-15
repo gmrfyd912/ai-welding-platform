@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>AI Live Coaching</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; height:100%; background:#000; color:#fff;
+    font-family:-apple-system, "Malgun Gothic", sans-serif; overflow:hidden; }
+
+  #root { position:fixed; inset:0; display:flex; flex-direction:column; }
+  #stage { flex:1; position:relative; background:#000; overflow:hidden; }
+  video { width:100%; height:100%; object-fit:contain; background:#000;
+    transform-origin: center center; transition: transform 0.15s ease-out; }
+  canvas#capture { display:none; }
+
+  /* Floating zoom controls — right side of camera view */
+  #zoom-controls { position:absolute; right:10px; top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; gap:8px; z-index:5; pointer-events:auto; }
+  .zoom-btn { width:44px; height:44px; padding:0; border-radius:22px;
+    background:rgba(0,0,0,0.65); color:#fff; font-size:20px; font-weight:bold;
+    border:1px solid rgba(255,255,255,0.25); display:flex; align-items:center;
+    justify-content:center; }
+  .zoom-btn:active { background:rgba(108,99,255,0.85); }
+  #zoom-label { width:44px; padding:6px 0; border-radius:10px;
+    background:rgba(0,0,0,0.65); color:#ecf0f1; font-size:11px; text-align:center;
+    border:1px solid rgba(255,255,255,0.18); }
+  #focus-indicator { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    pointer-events:none; opacity:0; transition:opacity 0.4s ease;
+    color:#2ecc71; font-size:13px; background:rgba(0,0,0,0.6); padding:4px 10px;
+    border-radius:10px; z-index:5; }
+  #focus-indicator.show { opacity:1; }
+
+  /* HUD overlay — minimal so the welding area is fully visible */
+  #hud { position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none;
+    display:flex; flex-direction:column; }
+
+  #status-pill { align-self:center; margin-top:10px; padding:5px 12px; border-radius:12px;
+    background:rgba(0,0,0,0.55); font-size:11px; color:#bdc3c7; pointer-events:auto;
+    border:1px solid rgba(255,255,255,0.18); display:flex; align-items:center; gap:6px; }
+  #status-dot { width:8px; height:8px; border-radius:50%; background:#7f8c8d; }
+  #status-dot.live { background:#2ecc71; box-shadow:0 0 8px #2ecc71; animation:pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+
+  /* The large center popup is intentionally hidden — keep DOM nodes for state. */
+  #message-card { display:none; }
+
+  /* Latest message — single-line strip pinned to the very bottom of the camera
+     view, just above the control bar. Small, semi-transparent, doesn't block. */
+  #latest-strip { position:absolute; left:8px; right:8px; bottom:6px;
+    pointer-events:none; display:flex; flex-direction:column; gap:3px; }
+  .l-item { padding:5px 10px; border-radius:8px; font-size:12px; color:#ecf0f1;
+    background:rgba(0,0,0,0.55); align-self:stretch; max-width:100%;
+    border-left:3px solid #7f8c8d; line-height:1.3;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .l-item.ok { border-left-color:#2ecc71; }
+  .l-item.warn { border-left-color:#f39c12; }
+  .l-item.danger { border-left-color:#e74c3c; }
+  .l-item.latest { font-size:13px; font-weight:600; background:rgba(0,0,0,0.7); }
+
+  /* Bottom controls — keep above the phone's gesture/nav bar in portrait */
+  #controls {
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(0,0,0,0.92), rgba(0,0,0,0.4));
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  /* Portrait phones: lift the controls higher so they aren't hidden by the
+     home-indicator / 3-button nav bar. Landscape stays as-is. */
+  @media (orientation: portrait) {
+    #controls {
+      padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+    }
+  }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; }
+  select { flex:1; padding:10px; border-radius:8px; border:1px solid #34495e;
+    background:#1a252c; color:#ecf0f1; font-size:13px; min-width:0; }
+  button { padding:12px 16px; font-size:14px; font-weight:bold; border:0; border-radius:10px;
+    color:#fff; background:#6C63FF; min-width:0; }
+  button.start { background:#27ae60; flex:1; }
+  button.stop { background:#c0392b; flex:1; }
+  button.icon { width:46px; height:46px; padding:0; font-size:18px; }
+  button:disabled { opacity:0.4; }
+  button:active { opacity:0.7; }
+
+  /* Setup state — before first start */
+  #setup-overlay { position:absolute; inset:0; background:rgba(0,0,0,0.85);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:30px; text-align:center; z-index:10; }
+  #setup-overlay h2 { color:#f1c40f; font-size:22px; margin:0 0 10px; }
+  #setup-overlay p { color:#bdc3c7; font-size:13px; line-height:1.6; margin:6px 0; }
+  #setup-overlay button { margin-top:16px; padding:14px 30px; font-size:16px; }
+
+  #err-banner { display:none; position:absolute; top:0; left:0; right:0; padding:8px 12px;
+    background:rgba(192,57,43,0.92); color:#fff; font-size:12px; text-align:center; z-index:20; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="stage">
+    <video id="preview" autoplay playsinline muted></video>
+    <canvas id="capture"></canvas>
+
+    <div id="err-banner"></div>
+
+    <!-- Zoom controls (visible only after camera starts) -->
+    <div id="zoom-controls" style="display:none;">
+      <button class="zoom-btn" onclick="changeZoom(0.5)" title="확대">+</button>
+      <div id="zoom-label">1.0x</div>
+      <button class="zoom-btn" onclick="changeZoom(-0.5)" title="축소">−</button>
+      <button class="zoom-btn" onclick="resetZoom()" title="초기화" style="font-size:14px;">⟲</button>
+    </div>
+    <div id="focus-indicator">📷 자동초점</div>
+
+    <div id="hud">
+      <div id="status-pill"><span id="status-dot"></span><span id="status-text">대기</span></div>
+      <!-- Hidden popup kept in DOM for compatibility with old code paths -->
+      <div id="message-card">
+        <div id="severity-icon"></div>
+        <div id="message-text"></div>
+        <div id="meta-text"></div>
+      </div>
+      <div id="latest-strip"></div>
+    </div>
+    <!-- Audio element used to play server-generated TTS (OpenAI tts-1) -->
+    <audio id="tts-audio" preload="auto" playsinline></audio>
+
+    <div id="setup-overlay">
+      <h2>AI 실시간 코칭</h2>
+      <p>용접면 카메라가 USB로 연결되어 있어야 합니다.</p>
+      <p>아래 버튼을 누르면 카메라 권한을 요청하고 장치 목록을 가져옵니다.</p>
+      <button onclick="setupCamera()">📷 카메라 준비</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="row">
+      <select id="device-select" disabled><option>-- 장치 없음 --</option></select>
+      <button class="icon" onclick="refreshDevices()" title="새로고침">🔄</button>
+      <button class="icon" onclick="toggleMute()" id="mute-btn" title="음소거">🔊</button>
+    </div>
+    <div class="row">
+      <button class="start" id="start-btn" onclick="startCoaching()" disabled>▶ 코칭 시작</button>
+      <button class="stop" id="stop-btn" onclick="stopCoaching()" disabled>■ 정지</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = ""; // same-origin: served from backend
+  const INTERVAL_MS = 2500;          // 프레임 전송 주기
+  const MIN_TTS_GAP_MS = 3500;       // 같은 메시지 음성 반복 최소 간격
+  const CAPTURE_W = 640;             // 다운샘플링 (전송 속도 ↑)
+  const CAPTURE_H = 360;
+  const JPEG_QUALITY = 0.7;
+
+  let stream = null;
+  let captureTimer = null;
+  let muted = false;
+  let inFlight = false;
+  let lastTtsMsg = "";
+  let lastTtsAt = 0;
+  let ttsKeepAliveTimer = null;
+  let ttsUnlocked = false;
+
+  // === Zoom & Focus state ===
+  // zoomLevel : 디지털 줌 배율 (1.0 ~ 4.0)
+  // hwZoom    : 카메라가 하드웨어 줌(PTZ) 지원 시 capability 객체 (min/max/step)
+  // hwZoomActive: 하드웨어 줌으로 처리 중이면 true (CSS 줌 미적용)
+  let zoomLevel = 1.0;
+  const ZOOM_MIN = 1.0, ZOOM_MAX = 4.0, ZOOM_STEP = 0.5;
+  let hwZoom = null;
+  let hwZoomActive = false;
+
+  function setError(msg) {
+    const el = document.getElementById('err-banner');
+    if (!msg) { el.style.display = 'none'; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 5500);
+  }
+
+  function setStatus(text, live) {
+    document.getElementById('status-text').textContent = text;
+    const dot = document.getElementById('status-dot');
+    if (live) dot.classList.add('live'); else dot.classList.remove('live');
+  }
+
+  async function setupCamera() {
+    try {
+      const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+      tmp.getTracks().forEach(t => t.stop());
+    } catch (e) {
+      setError("카메라 권한 거부됨: " + e.message);
+      return;
+    }
+    document.getElementById('setup-overlay').style.display = 'none';
+    await refreshDevices();
+    document.getElementById('start-btn').disabled = false;
+  }
+
+  async function refreshDevices() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const cams = all.filter(d => d.kind === 'videoinput');
+      const sel = document.getElementById('device-select');
+      sel.innerHTML = '';
+      if (!cams.length) {
+        sel.innerHTML = '<option>-- 장치 없음 --</option>';
+        sel.disabled = true;
+        setError("videoinput 장치가 없습니다.");
+        return;
+      }
+      sel.disabled = false;
+      // 우선순위: USB/UVC > 후면 카메라 > 첫번째
+      let preferIdx = -1;
+      cams.forEach((d, i) => {
+        const lbl = d.label || '';
+        if (preferIdx < 0 && /usb|uvc|endo|external/i.test(lbl)) preferIdx = i;
+      });
+      if (preferIdx < 0) {
+        cams.forEach((d, i) => {
+          const lbl = d.label || '';
+          if (preferIdx < 0 && /(back|rear|environment|후면|뒤)/i.test(lbl)) preferIdx = i;
+        });
+      }
+      if (preferIdx < 0) preferIdx = 0;
+
+      cams.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        const lbl = d.label || ('Camera ' + (i+1));
+        opt.textContent = (i+1) + '. ' + lbl.substring(0, 35);
+        if (i === preferIdx) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      setError("장치 조회 실패: " + e.message);
+    }
+  }
+
+  async function startCoaching() {
+    if (captureTimer) return;
+    const id = document.getElementById('device-select').value;
+    try {
+      stopStream();
+      const constraints = {
+        video: id
+          ? { deviceId: { exact: id }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 30 } }
+          : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 30 } }
+      };
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const v = document.getElementById('preview');
+      v.srcObject = stream;
+      await v.play();
+
+      // 카메라 capability 분석 → 하드웨어 줌 / 자동초점 설정 시도 (silently fail)
+      await applyCameraCapabilities();
+      // 줌 컨트롤 UI 노출
+      document.getElementById('zoom-controls').style.display = 'flex';
+      zoomLevel = 1.0; updateZoomUi();
+
+      document.getElementById('start-btn').disabled = true;
+      document.getElementById('stop-btn').disabled = false;
+      setStatus("분석중", true);
+
+      // 사용자 제스처 시점에 TTS 워밍업 (실제 들리는 한국어 발화로 오디오 채널을 엽니다)
+      unlockTts();
+      showMessage({ severity: "ok", message: "AI 코칭을 시작합니다." }, true);
+
+      captureTimer = setInterval(captureAndAnalyze, INTERVAL_MS);
+      // 첫 프레임은 즉시 (1초 후 카메라 안정화 시점)
+      setTimeout(captureAndAnalyze, 1000);
+    } catch (e) {
+      setError("카메라 시작 실패: " + e.message);
+    }
+  }
+
+  function stopStream() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    hwZoom = null; hwZoomActive = false;
+    document.getElementById('zoom-controls').style.display = 'none';
+    const v = document.getElementById('preview');
+    if (v) v.style.transform = '';
+  }
+
+  // 카메라 capability 검사 → 하드웨어 줌 + 자동초점(continuous) 적용 시도
+  // 지원하지 않는 카메라는 silent ignore (USB UVC 카메라는 대부분 펌웨어에 자동초점 내장)
+  async function applyCameraCapabilities() {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track || !track.getCapabilities) return;
+    const caps = track.getCapabilities();
+    const adv = [];
+
+    // 하드웨어 줌 capability 보유 시 활용 (PTZ 카메라, 일부 모바일 후면 카메라)
+    if (caps.zoom && typeof caps.zoom.min === 'number' && typeof caps.zoom.max === 'number') {
+      hwZoom = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
+      adv.push({ zoom: hwZoom.min });
+      hwZoomActive = true;
+    }
+    // 자동초점 — continuous 모드 우선, 없으면 single-shot
+    if (caps.focusMode) {
+      if (caps.focusMode.includes('continuous')) {
+        adv.push({ focusMode: 'continuous' });
+        flashFocusIndicator();
+      } else if (caps.focusMode.includes('auto')) {
+        adv.push({ focusMode: 'auto' });
+      }
+    }
+    // 자동 노출 / 화이트밸런스도 가능하면 continuous 로 (용접 빛 폭변화 대응)
+    if (caps.exposureMode && caps.exposureMode.includes('continuous')) {
+      adv.push({ exposureMode: 'continuous' });
+    }
+    if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes('continuous')) {
+      adv.push({ whiteBalanceMode: 'continuous' });
+    }
+
+    if (adv.length) {
+      try { await track.applyConstraints({ advanced: adv }); }
+      catch (e) { /* 미지원 — 디지털 줌으로 폴백, 무시 */ }
+    }
+  }
+
+  function flashFocusIndicator() {
+    const el = document.getElementById('focus-indicator');
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 1500);
+  }
+
+  // === 줌 컨트롤 ===
+  // 1) 하드웨어 줌 지원 카메라: applyConstraints({ zoom: ... }) 사용 → 캡쳐 자동 반영됨
+  // 2) 미지원 카메라: CSS transform: scale() 디지털 줌 + 캔버스 캡쳐 시 영역 crop
+  async function changeZoom(delta) {
+    let next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomLevel + delta));
+    if (Math.abs(next - zoomLevel) < 0.01) return;
+    zoomLevel = next;
+    await applyZoom();
+    updateZoomUi();
+  }
+
+  async function resetZoom() {
+    zoomLevel = 1.0;
+    await applyZoom();
+    updateZoomUi();
+  }
+
+  async function applyZoom() {
+    const v = document.getElementById('preview');
+    if (hwZoomActive && stream) {
+      // 하드웨어 줌: zoomLevel(1~4) 을 카메라 capability 범위로 매핑
+      const track = stream.getVideoTracks()[0];
+      const range = hwZoom.max - hwZoom.min;
+      const t = (zoomLevel - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN); // 0..1
+      const target = hwZoom.min + range * t;
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: target }] });
+        v.style.transform = ''; // 디지털 줌 해제
+        return;
+      } catch (e) {
+        // 하드웨어 줌 실패 → 디지털 줌 폴백
+        hwZoomActive = false;
+      }
+    }
+    // 디지털 줌 (CSS scale)
+    v.style.transform = zoomLevel > 1.001 ? `scale(${zoomLevel})` : '';
+  }
+
+  function updateZoomUi() {
+    document.getElementById('zoom-label').textContent = zoomLevel.toFixed(1) + 'x';
+  }
+
+  function stopCoaching() {
+    if (captureTimer) { clearInterval(captureTimer); captureTimer = null; }
+    if (ttsKeepAliveTimer) { clearInterval(ttsKeepAliveTimer); ttsKeepAliveTimer = null; }
+    stopStream();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    document.getElementById('start-btn').disabled = false;
+    document.getElementById('stop-btn').disabled = true;
+    setStatus("정지", false);
+    showMessage({ severity: "ok", message: "코칭이 정지되었습니다." }, false);
+  }
+
+  async function captureAndAnalyze() {
+    if (inFlight) return;          // 이전 요청이 끝나기 전엔 스킵 (큐 누적 방지)
+    const v = document.getElementById('preview');
+    if (!v.videoWidth) return;
+    const c = document.getElementById('capture');
+    c.width = CAPTURE_W;
+    c.height = CAPTURE_H;
+    const ctx = c.getContext('2d');
+    // 디지털 줌이 활성화돼 있으면 비디오 중앙의 줌 영역만 잘라 분석에 사용
+    // (하드웨어 줌은 이미 카메라 단계에서 적용되므로 별도 crop 불필요)
+    if (!hwZoomActive && zoomLevel > 1.001) {
+      const sw = v.videoWidth / zoomLevel;
+      const sh = v.videoHeight / zoomLevel;
+      const sx = (v.videoWidth - sw) / 2;
+      const sy = (v.videoHeight - sh) / 2;
+      ctx.drawImage(v, sx, sy, sw, sh, 0, 0, CAPTURE_W, CAPTURE_H);
+    } else {
+      ctx.drawImage(v, 0, 0, CAPTURE_W, CAPTURE_H);
+    }
+    const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
+    const base64 = dataUrl.split(',')[1];
+
+    inFlight = true;
+    try {
+      const r = await fetch(API_BASE + "/api/coaching/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, mimeType: "image/jpeg" })
+      });
+      const data = await r.json();
+      if (!data || !data.message) {
+        setError("응답 오류");
+      } else {
+        showMessage(data, true);
+      }
+    } catch (e) {
+      setError("네트워크 오류: " + e.message);
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  function showMessage(d, withTts) {
+    const sev = d.severity || 'warn';
+    pushLatest(d, sev);
+    if (withTts) speak(d.message, sev);
+  }
+
+  // 화면 아래 작은 스트립에 최신 메시지만 표시. 직전 메시지는 흐리게 1줄 더 표시.
+  function pushLatest(d, sev) {
+    const wrap = document.getElementById('latest-strip');
+    const div = document.createElement('div');
+    div.className = 'l-item latest ' + sev;
+    div.textContent = d.message;
+    wrap.insertBefore(div, wrap.firstChild);
+    // 이전 latest 들을 흐리게 처리하고 최대 2개만 유지
+    Array.from(wrap.children).forEach((el, i) => {
+      if (i === 0) return;
+      el.classList.remove('latest');
+      el.style.opacity = '0.55';
+    });
+    while (wrap.children.length > 2) wrap.removeChild(wrap.lastChild);
+  }
+
+  // ===== 서버 OpenAI TTS 기반 재생 =====
+  // 브라우저 speechSynthesis 가 iOS WebView 에서 너무 불안정하므로,
+  // 백엔드에서 MP3 를 받아 <audio> 로 재생합니다. 한 번 사용자 제스처로 unlock 되면
+  // 이후로는 자동재생이 가능합니다.
+  let audioUnlocked = false;
+  const ttsQueue = [];     // 아직 재생 못한 메시지 큐
+  let ttsBusy = false;     // 현재 재생/요청중인지
+
+  function unlockTts() {
+    const a = document.getElementById('tts-audio');
+    if (!a) return;
+    // 사용자 제스처 시점 — 무음 클립으로 오토플레이 권한 잠금 해제
+    try {
+      a.muted = false;
+      a.volume = 1.0;
+      // 첫 번째 실제 안내 음성을 큐에 넣고 재생
+      enqueueTts("음성 코칭을 시작합니다.");
+    } catch (e) {
+      setError("음성 초기화 실패: " + e.message);
+    }
+  }
+
+  function enqueueTts(text) {
+    if (muted || !text) return;
+    // 큐가 너무 길어지지 않게 — 새 메시지가 더 중요하므로 오래된 건 버립니다.
+    if (ttsQueue.length > 1) ttsQueue.length = 1;
+    ttsQueue.push(text);
+    pumpTtsQueue();
+  }
+
+  async function pumpTtsQueue() {
+    if (ttsBusy) return;
+    const text = ttsQueue.shift();
+    if (!text) return;
+    ttsBusy = true;
+    const a = document.getElementById('tts-audio');
+    try {
+      const url = API_BASE + "/api/coaching/tts?text=" + encodeURIComponent(text);
+      a.src = url;
+      a.onended = () => { ttsBusy = false; pumpTtsQueue(); };
+      a.onerror = () => {
+        console.warn('[tts] audio element error');
+        setError("음성 재생 실패. 음량과 무음 스위치를 확인하세요.");
+        ttsBusy = false;
+        // 큐 비워서 무한 재시도 방지
+        ttsQueue.length = 0;
+      };
+      const playP = a.play();
+      if (playP && typeof playP.then === 'function') {
+        playP.then(() => {
+          audioUnlocked = true;
+        }).catch((err) => {
+          console.warn('[tts] play() rejected:', err && err.message);
+          setError("음성 자동재생 차단됨. 화면을 한번 터치하세요.");
+          ttsBusy = false;
+        });
+      }
+    } catch (e) {
+      console.warn('[tts] pump error', e);
+      ttsBusy = false;
+    }
+  }
+
+  function speak(text, severity) {
+    if (muted || !text) return;
+    const now = Date.now();
+    // 같은 메시지는 일정 간격 내 재생 안 함. 다른 메시지면 즉시 큐에 넣음.
+    if (text === lastTtsMsg && (now - lastTtsAt) < MIN_TTS_GAP_MS) return;
+    lastTtsMsg = text;
+    lastTtsAt = now;
+
+    // danger 일 때는 현재 재생을 끊고 즉시 새 메시지로 교체
+    if (severity === 'danger') {
+      const a = document.getElementById('tts-audio');
+      try { a.pause(); a.currentTime = 0; } catch (_) {}
+      ttsQueue.length = 0;
+      ttsBusy = false;
+    }
+    enqueueTts(text);
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    document.getElementById('mute-btn').textContent = muted ? '🔇' : '🔊';
+    const a = document.getElementById('tts-audio');
+    if (muted) {
+      try { a.pause(); a.currentTime = 0; } catch (_) {}
+      ttsQueue.length = 0;
+      ttsBusy = false;
+    } else {
+      // 음소거 해제 시점은 사용자 제스처 → 다시 unlock & 안내
+      unlockTts();
+    }
+  }
+
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
+  }
+</script>
+</body>

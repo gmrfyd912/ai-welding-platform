@@ -1,0 +1,153 @@
+앱 UI를 수정하기 전에, 서버가 명확하게 개별 항목(폭, 직진도, 높이)을 100점 만점으로 계산하고 결함의 실제 크기(mm)를 뽑아내도록 파이썬 백엔드의 비전 및 계산 엔진을 대대적으로 개편한다. 아래 지시사항에 따라 파일을 수정해 줘.
+
+1. vision_processor.py 전면 수정
+기존 코드를 지우고, 직진도 기하학적 연산(cv2.fitLine)과 결함 크기(mm) 추출 로직이 포함된 아래 코드로 완전히 덮어씌워.
+
+Python
+import cv2
+import numpy as np
+import math
+
+def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0):
+    marker_pred = next((p for p in predictions if p.get('class') == 'Reference_Marker'), None)
+    
+    if not marker_pred:
+        return {"status": "error", "message": "사진에서 30mm 마커(Reference_Marker)를 찾을 수 없습니다."}
+        
+    marker_pixel_width = marker_pred['width']
+    ppm = marker_pixel_width / marker_real_size_mm
+    
+    bead_widths_mm = []
+    straightness_variances = []
+    defects_info = []
+    
+    for pred in predictions:
+        cls_name = pred.get('class', '')
+        if cls_name == 'Weld_Bead':
+            if 'points' in pred and len(pred['points']) >= 3:
+                pts = np.array([[p['x'], p['y']] for p in pred['points']], dtype=np.int32)
+                
+                # 폭 계산
+                rect = cv2.minAreaRect(pts)
+                (cx, cy), (width, height), angle = rect
+                pixel_bead_width = min(width, height)
+                bead_widths_mm.append(pixel_bead_width / ppm)
+                
+                # 직진도 계산 (cv2.fitLine 활용 선형 회귀)
+                [vx, vy, x0, y0] = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01)
+                a, b, c = -vy[0], vx[0], vy[0]*x0[0] - vx[0]*y0[0]
+                distances = [abs(a*p[0] + b*p[1] + c) / math.sqrt(a**2 + b**2) for p in pts]
+                if distances:
+                    straightness_variances.append(max(distances) / ppm)
+
+        elif cls_name != 'Reference_Marker':
+            # 결함 크기 및 위치 추출
+            if 'width' in pred and 'height' in pred:
+                defect_w = pred['width'] / ppm
+                defect_h = pred['height'] / ppm
+                max_size_mm = max(defect_w, defect_h)
+                defects_info.append({
+                    "class": cls_name,
+                    "size_mm": round(max_size_mm, 2),
+                    "x_percent": round((pred.get('x', 0) / pred.get('image_width', 1000)) * 100, 1),
+                    "y_percent": round((pred.get('y', 0) / pred.get('image_height', 1000)) * 100, 1)
+                })
+
+    if not bead_widths_mm:
+        return {"status": "error", "message": "사진에서 용접 비드(Weld_Bead)를 인식하지 못했습니다."}
+        
+    return {
+        "status": "success",
+        "ppm": round(ppm, 2),
+        "bead_width_max": round(max(bead_widths_mm), 2),
+        "bead_width_min": round(min(bead_widths_mm), 2),
+        "straightness_variance": round(max(straightness_variances), 2) if straightness_variances else 0.0,
+        "defects_info": defects_info
+    }
+2. welding_calculator.py 전면 수정
+기존 코드를 지우고, 비드 폭/직진도/높이를 각각 100점 만점으로 평가하여 조건부 평균(bead_total_score)을 내는 아래 코드로 완전히 덮어씌워.
+
+Python
+def calculate_weld_score(vision_data, has_side_photo=False, side_vision_data=None):
+    # 1. 비드 폭 균일성 (100점)
+    width_variance = vision_data.get('bead_width_max', 0) - vision_data.get('bead_width_min', 0)
+    if width_variance < 1.0: width_score = 100
+    elif width_variance < 2.0: width_score = 85
+    elif width_variance < 3.0: width_score = 70
+    else: width_score = 50
+
+    # 2. 비드 직진도 (100점)
+    st_var = vision_data.get('straightness_variance', 0)
+    if st_var < 1.0: st_score = 100
+    elif st_var < 2.0: st_score = 85
+    elif st_var < 3.0: st_score = 70
+    else: st_score = 50
+    
+    scores = [width_score, st_score]
+    height_score = None
+    height_variance = 0.0
+    
+    # 3. 비드 높이 균일성 (측면 사진 존재 시 100점 추가)
+    if has_side_photo and side_vision_data and side_vision_data.get('status') == 'success':
+        height_variance = side_vision_data.get('bead_width_max', 0) - side_vision_data.get('bead_width_min', 0)
+        if height_variance < 1.0: height_score = 100
+        elif height_variance < 2.0: height_score = 85
+        elif height_variance < 3.0: height_score = 70
+        else: height_score = 50
+        scores.append(height_score)
+
+    # 비드 분석 최종 평균 점수
+    bead_total_score = int(sum(scores) / len(scores))
+    
+    # 4. 결함 감점 (크기 mm 반영)
+    penalty = 0
+    defect_list_ko = []
+    is_critical_fail = False
+    
+    defects = vision_data.get('defects_info', [])
+    for d in defects:
+        d_type = d.get('class', '')
+        d_size = d.get('size_mm', 0)
+        
+        if d_type == 'Crack':
+            penalty += 100; defect_list_ko.append(f"균열({d_size}mm, 즉시 불합격)"); is_critical_fail = True
+        elif d_type in ['Lack of Fusion', 'Incomplete Penetration']: penalty += 20; defect_list_ko.append(f"용입/용착 불량({d_size}mm, -20점)")
+        elif d_type == 'Porosity': penalty += 10; defect_list_ko.append(f"기공({d_size}mm, -10점)")
+        elif d_type == 'Undercut': penalty += 10; defect_list_ko.append(f"언더컷({d_size}mm, -10점)")
+        elif d_type == 'Overlap': penalty += 10; defect_list_ko.append(f"오버랩({d_size}mm, -10점)")
+        elif d_type == 'Arc Strike': penalty += 10; defect_list_ko.append(f"아크 스트라이크(-10점)")
+        elif d_type == 'Spatter': penalty += 5; defect_list_ko.append(f"스패터(-5점)")
+        elif d_type == 'Excessive Reinforcement': penalty += 10; defect_list_ko.append(f"여고 과다({d_size}mm, -10점)")
+
+    final_score = max(0, min(100, bead_total_score - penalty))
+    is_pass = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
+    
+    return {
+        "final_score": final_score, 
+        "is_pass": is_pass,
+        "bead_total_score": bead_total_score,
+        "width_score": width_score,
+        "width_variance": round(width_variance, 2),
+        "straightness_score": st_score,
+        "straightness_variance": round(st_var, 2),
+        "height_score": height_score,
+        "height_variance": round(height_variance, 2),
+        "detected_defects": defect_list_ko
+    }
+3. main.py 라우터 대대적 수정 (중요)
+/analyze-welding에서 side_file (측면 사진)이 들어왔다면, Roboflow API를 한 번 더 호출해서 측면 사진의 side_predictions를 받아.
+
+그 후 side_vision_data = analyze_bead_dimensions(side_predictions)를 추출해.
+
+calculate_weld_score()를 호출할 때 파라미터로 (vision_data, has_side_photo=True/False, side_vision_data)를 정확히 전달해.
+
+최종 반환하는 JSON 응답부에서, 프론트엔드 모바일 앱이 받을 beadAnalysis 필드를 완전히 재구성해. '비드 형상', '피치' 같은 쓸데없는 필드는 삭제하고, 새 점수 체계에 맞춰서 아래 구조로 반환해 줘.
+
+JSON
+"beadAnalysis": {
+    "totalScore": weld_data["bead_total_score"],
+    "width": { "value": f"{weld_data['width_variance']}mm 편차", "score": weld_data["width_score"] },
+    "straightness": { "value": f"{weld_data['straightness_variance']}mm 이탈", "score": weld_data["straightness_score"] },
+    "height": { "value": f"{weld_data['height_variance']}mm 편차", "score": weld_data["height_score"] } if weld_data["height_score"] is not None else None
+}
+이 3가지를 에러 없이 완벽하게 적용하고 결과를 알려줘.

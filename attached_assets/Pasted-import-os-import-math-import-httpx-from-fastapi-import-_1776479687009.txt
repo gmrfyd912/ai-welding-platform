@@ -1,0 +1,159 @@
+import os
+import math
+import httpx
+from fastapi import FastAPI, UploadFile, Form, File, HTTPException
+from fastapi.responses import JSONResponse
+from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
+
+app = FastAPI(title="Welding AI Master Pipeline")
+
+# ==========================================
+# [설정] 환경 변수 (Replit Secrets에 등록 필요)
+# ==========================================
+ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "your_roboflow_key")
+ROBOFLOW_MODEL = "your_project_name" # 예: welding-defects-xyz
+ROBOFLOW_VERSION = "1"
+
+# LLM 클라이언트 초기화
+openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+anthropic_client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+# 기준 마커 크기 (이전 단계에서 자로 잰 실제 크기 입력)
+REAL_MARKER_SIZE_MM = 30.0 
+
+# ==========================================
+# [모듈 1] 픽셀 -> mm 변환 로직
+# ==========================================
+def calculate_pixel_to_mm_ratio(marker_polygon):
+    if not marker_polygon: return None
+    x_coords = [point['x'] for point in marker_polygon]
+    pixel_width = max(x_coords) - min(x_coords)
+    return REAL_MARKER_SIZE_MM / pixel_width if pixel_width > 0 else None
+
+def process_vision_data(roboflow_json):
+    predictions = roboflow_json.get("predictions", [])
+    marker_polygon = None
+    defects = []
+    
+    for pred in predictions:
+        class_name = pred['class']
+        polygon = pred.get('points', [])
+        
+        if class_name == "Reference_Marker":
+            marker_polygon = polygon
+        elif class_name != "Weld_Bead":
+            defects.append({"type": class_name, "polygon": polygon, "confidence": pred['confidence']})
+            
+    if not marker_polygon:
+        raise ValueError("사진에서 30mm ArUco 마커를 찾을 수 없습니다. 마커가 포함되도록 다시 촬영해 주세요.")
+        
+    mm_ratio = calculate_pixel_to_mm_ratio(marker_polygon)
+    
+    analyzed_defects = []
+    for defect in defects:
+        x_coords = [p['x'] for p in defect['polygon']]
+        y_coords = [p['y'] for p in defect['polygon']]
+        width_mm = (max(x_coords) - min(x_coords)) * mm_ratio
+        height_mm = (max(y_coords) - min(y_coords)) * mm_ratio
+        max_length_mm = round(math.sqrt(width_mm**2 + height_mm**2), 2)
+        
+        analyzed_defects.append({
+            "type": defect['type'],
+            "size_mm": max_length_mm
+        })
+        
+    return analyzed_defects
+
+# ==========================================
+# [모듈 2] LLM 리포트 생성 로직
+# ==========================================
+async def generate_expert_report(process: str, defects: list, ai_model: str):
+    defects_str = "\n".join([f"- {d['type']}: 최대 길이 약 {d['size_mm']}mm" for d in defects])
+    if not defects_str: defects_str = "- 특이 결함 없음 (매우 양호함)"
+
+    prompt = f"""
+    당신은 20년 경력의 까다롭지만 실력 있는 대한민국 최고의 용접 명장입니다.
+    아래는 AI 비전 시스템이 측정한 {process} 용접 결과물의 정량적 데이터입니다.
+
+    [측정 데이터]
+    - 용접 프로세스: {process}
+    - 감지된 결함:
+    {defects_str}
+
+    [지시사항]
+    1. 위 데이터를 바탕으로 결함 발생 원인을 짚어주세요.
+    2. 훈련생이 다음 시도에서 어떻게 자세나 기기 세팅을 교정해야 하는지 실무적인 조언을 해주세요.
+    3. 진짜 현장 반장님이 멘토링해 주는 듯한 따뜻하고 엄격한 톤앤매너(Vibe)의 마크다운으로 작성하세요.
+    """
+
+    if ai_model.lower() == "claude":
+        response = await anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=1000,
+            temperature=0.7,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.content[0].text
+    else:
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=1000,
+            temperature=0.7,
+            messages=[
+                {"role": "system", "content": "당신은 20년 경력의 용접 명장입니다."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choices[0].message.content
+
+# ==========================================
+# [API 엔드포인트] 마스터 파이프라인 통합
+# ==========================================
+@app.post("/api/v1/analyze-weld")
+async def analyze_weld_pipeline(
+    file: UploadFile = File(...),
+    process: str = Form("GTAW"), # 앱에서 폼 데이터로 용접 종류 전송
+    ai_model: str = Form("claude") # 앱에서 폼 데이터로 분석 모델 전송
+):
+    try:
+        # 1. 파일 읽기
+        image_bytes = await file.read()
+
+        # 2. Roboflow로 이미지 전송 (비동기)
+        roboflow_url = f"https://detect.roboflow.com/{ROBOFLOW_MODEL}/{ROBOFLOW_VERSION}?api_key={ROBOFLOW_API_KEY}"
+        async with httpx.AsyncClient() as client:
+            robo_response = await client.post(
+                roboflow_url,
+                data=image_bytes,
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            
+        if robo_response.status_code != 200:
+            raise HTTPException(status_code=502, detail="비전 AI(Roboflow) 서버 응답 오류")
+            
+        roboflow_data = robo_response.json()
+
+        # 3. 픽셀 -> mm 변환 및 결함 데이터 추출
+        try:
+            analyzed_defects = process_vision_data(roboflow_data)
+        except ValueError as ve:
+             # 마커가 없거나 변환 실패 시 클라이언트에게 명확한 에러 전달
+             return JSONResponse(status_code=400, content={"status": "error", "message": str(ve)})
+
+        # 4. LLM에 데이터 전송 및 리포트 생성 (비동기)
+        expert_report = await generate_expert_report(process, analyzed_defects, ai_model)
+
+        # 5. 최종 결과 반환
+        return {
+            "status": "success",
+            "process": process,
+            "ai_model_used": ai_model,
+            "defects_summary": analyzed_defects,
+            "expert_report": expert_report
+        }
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"서버 내부 오류: {str(e)}"})
+
+# 실행: uvicorn main:app --host 0.0.0.0 --port 8080 --reload

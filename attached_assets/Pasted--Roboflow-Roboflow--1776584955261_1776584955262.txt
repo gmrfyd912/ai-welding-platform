@@ -1,0 +1,98 @@
+"백엔드의 로직은 완벽하지만, Roboflow에서 훈련된 실제 클래스명과 우리 코드의 클래스명이 달라서 매칭이 안 되는 문제가 있어.
+Roboflow의 실제 클래스명은 다음과 같아: Arc Strike, Crack, Excessive Reinforcement, Incomplete Penetration, Lack of Fusion, Overlap, Porosity, Reference_Marker, Spatter, Undercut, Weld_Bead.
+
+이 정확한 클래스명을 반영해서 두 개의 파이썬 파일을 다시 작성하고, main.py를 정리해 줘.
+
+1. vision_processor.py 수정 (정확한 클래스명 매칭)
+아래 코드로 완전히 덮어씌워 줘.
+
+Python
+import cv2
+import numpy as np
+
+def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0):
+    # 'Reference_Marker' 클래스를 찾음
+    marker_pred = next((p for p in predictions if p['class'] == 'Reference_Marker'), None)
+    
+    if not marker_pred:
+        return {"status": "error", "message": "사진에서 30mm 마커(Reference_Marker)를 찾을 수 없습니다."}
+        
+    marker_pixel_width = marker_pred['width']
+    pixels_per_metric = marker_pixel_width / marker_real_size_mm
+    
+    bead_widths_mm = []
+    
+    for pred in predictions:
+        # 폭 측정은 'Weld_Bead' 클래스만 대상으로 함
+        if pred['class'] == 'Weld_Bead':
+            if 'points' in pred and len(pred['points']) >= 3:
+                pts = np.array([[p['x'], p['y']] for p in pred['points']], dtype=np.int32)
+                rect = cv2.minAreaRect(pts)
+                (cx, cy), (width, height), angle = rect
+                
+                pixel_bead_width = min(width, height)
+                real_width_mm = pixel_bead_width / pixels_per_metric
+                bead_widths_mm.append(real_width_mm)
+                
+    if not bead_widths_mm:
+        return {"status": "error", "message": "사진에서 용접 비드(Weld_Bead)를 인식하지 못했습니다."}
+        
+    bead_width_max = max(bead_widths_mm)
+    bead_width_min = min(bead_widths_mm)
+    
+    return {
+        "status": "success",
+        "ppm": round(pixels_per_metric, 2),
+        "bead_width_max": round(bead_width_max, 2),
+        "bead_width_min": round(bead_width_min, 2)
+    }
+2. welding_calculator.py 수정 (결함명 매칭 및 추가)
+아래 코드로 완전히 덮어씌워 줘.
+
+Python
+import numpy as np
+
+def calculate_weld_score(bead_width_max, bead_width_min, defects):
+    width_variance = bead_width_max - bead_width_min
+    if width_variance < 1.0:
+        shape_score, shape_eval = 95, "우수"
+    elif 1.0 <= width_variance < 2.0:
+        shape_score, shape_eval = 85, "양호"
+    elif 2.0 <= width_variance < 3.0:
+        shape_score, shape_eval = 70, "주의"
+    else:
+        shape_score, shape_eval = 50, "불량"
+        
+    penalty = 0
+    defect_list_ko = []
+    is_critical_fail = False
+    
+    # Roboflow의 실제 대소문자 및 띄어쓰기 유지 클래스명 사용
+    for defect in defects:
+        d_type = defect.get('class', '')
+        if d_type == 'Crack':
+            penalty += 100
+            defect_list_ko.append("균열(-100점, 즉시 불합격)")
+            is_critical_fail = True
+        elif d_type in ['Lack of Fusion', 'Incomplete Penetration']:
+            penalty += 20
+            defect_list_ko.append("용입/용착 불량(-20점)")
+        elif d_type == 'Porosity': penalty += 10; defect_list_ko.append("기공(-10점)")
+        elif d_type == 'Undercut': penalty += 10; defect_list_ko.append("언더컷(-10점)")
+        elif d_type == 'Overlap': penalty += 10; defect_list_ko.append("오버랩(-10점)")
+        elif d_type == 'Arc Strike': penalty += 10; defect_list_ko.append("아크 스트라이크(-10점)")
+        elif d_type == 'Spatter': penalty += 5; defect_list_ko.append("스패터(-5점)")
+        elif d_type == 'Excessive Reinforcement': penalty += 10; defect_list_ko.append("여고 과다(-10점)")
+
+    final_score = max(0, min(100, shape_score - penalty))
+    is_pass = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
+    
+    return {
+        "final_score": final_score, "is_pass": is_pass,
+        "width_variance": round(width_variance, 2), "shape_eval": shape_eval,
+        "detected_defects": defect_list_ko
+    }
+3. main.py 정리
+이전에 네가 추가했던 normalize_predictions_for_vision 같은 클래스명 임의 변환 로직이 main.py에 남아있다면 전부 삭제해 줘. 이제 vision_processor.py와 welding_calculator.py가 원본 클래스명 자체를 완벽하게 인식하니까 중간에서 변환할 필요가 없어.
+
+위 3가지를 완벽하게 적용해 줘."

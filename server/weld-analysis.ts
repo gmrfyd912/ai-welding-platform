@@ -1,0 +1,191 @@
+import type { Express, Request, Response } from "express";
+import express from "express";
+import pool from "./db";
+
+const largeBodyParser = express.json({ limit: "30mb" });
+
+const FASTAPI_BASE = "http://localhost:8080";
+const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
+
+// ── AbortSignal 기반 타임아웃 fetch ─────────────────────────────
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { ...options, signal: controller.signal });
+    return resp;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── FastAPI /analyze-welding 호출 ─────────────────────────────
+async function callFastApiAnalyze(params: {
+  frontPhoto:    string;
+  sidePhoto?:    string;
+  backPhoto?:    string;
+  process:       string;
+  posture:       string;
+  material:      string;
+  beadType:      string;
+  passType:      string;
+  aiModel:       string;
+  adminFeedback: string;
+  userHistory:    string;
+  plateThickness: string;
+  pipeOuterDiameterMm: string;
+  language:       string;
+}): Promise<any> {
+  const formData = new FormData();
+
+  const frontBuf = Buffer.from(params.frontPhoto, "base64");
+  formData.append("file", new Blob([frontBuf], { type: "image/jpeg" }), "front.jpg");
+
+  if (params.sidePhoto) {
+    const sideBuf = Buffer.from(params.sidePhoto, "base64");
+    formData.append("side_file", new Blob([sideBuf], { type: "image/jpeg" }), "side.jpg");
+  }
+  if (params.backPhoto) {
+    const backBuf = Buffer.from(params.backPhoto, "base64");
+    formData.append("back_file", new Blob([backBuf], { type: "image/jpeg" }), "back.jpg");
+  }
+
+  formData.append("process",        params.process);
+  formData.append("posture",        params.posture);
+  formData.append("material",       params.material);
+  formData.append("bead_type",      params.beadType);
+  formData.append("pass_type",      params.passType);
+  formData.append("ai_model",       params.aiModel === "claude-sonnet" ? "claude" : "gpt");
+  formData.append("admin_feedback", params.adminFeedback);
+  formData.append("user_history",   params.userHistory);
+  formData.append("plate_thickness", params.plateThickness);
+  formData.append("pipe_outer_diameter_mm", params.pipeOuterDiameterMm);
+  formData.append("language",       params.language);
+
+  const resp = await fetchWithTimeout(
+    `${FASTAPI_BASE}/analyze-welding`,
+    { method: "POST", body: formData },
+    FASTAPI_TIMEOUT_MS,
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    // 400 = 사용자 입력 문제 (잘못된 사진/마커 미검출) → 재시도하지 않고
+    // 그대로 전파해 상위에서 메시지를 사용자에게 보여줌
+    const err: any = new Error(`FastAPI ${resp.status}: ${errText.slice(0, 300)}`);
+    err.status = resp.status;
+    err.body = errText;
+    throw err;
+  }
+
+  return await resp.json();
+}
+
+// ── 메인 라우트: Express → FastAPI 프록시 ──────────────────────
+export function registerWeldAnalysisRoute(app: Express): void {
+  app.post("/api/analyze-weld", largeBodyParser, async (req: Request, res: Response) => {
+    const {
+      photos, imageBase64,
+      process, posture, material,
+      selfScore, beadType, passType, aiModel,
+      previousResultsSummary, plateThickness, pipeOuterDiameterMm,
+      language,
+    } = req.body;
+
+    const frontPhoto = photos?.front || imageBase64;
+    if (!frontPhoto) {
+      return res.status(400).json({ error: "정면 사진이 필요합니다." });
+    }
+
+    const imgSizeKB = Math.round(frontPhoto.length * 0.75 / 1024);
+    console.log(`[analyze-weld] 요청 수신 | 이미지크기=${imgSizeKB}KB | 공정=${process} | AI모델=${aiModel}`);
+
+    try {
+      // 1) 관리자 피드백 (DB) → FastAPI에 전달
+      let adminFeedback = "";
+      try {
+        const fb = await pool.query(
+          "SELECT feedback_text FROM admin_feedback ORDER BY created_at DESC LIMIT 20"
+        );
+        if (fb.rows.length > 0) {
+          adminFeedback = fb.rows
+            .map((r: any, i: number) => `${i + 1}. ${r.feedback_text}`)
+            .join("\n");
+        }
+      } catch {}
+
+      // 2) FastAPI에 모든 분석 위임 (콜드 스타트 대응: 최대 3회 시도, 백오프 5s → 10s)
+      const callParams = {
+        frontPhoto,
+        sidePhoto:    photos?.side,
+        backPhoto:    photos?.back,
+        process:      process  || "FCAW",
+        posture:      posture  || "1G",
+        material:     material || "탄소강 평판",
+        beadType:     beadType || "위빙 비드",
+        passType:     passType || "",
+        aiModel:      aiModel  || "gpt",
+        adminFeedback,
+        userHistory:    previousResultsSummary || "",
+        plateThickness: plateThickness || "",
+        pipeOuterDiameterMm: pipeOuterDiameterMm ? String(pipeOuterDiameterMm) : "",
+        language:       language || "ko",
+      };
+
+      // 콜드 스타트 사전 워밍업: FastAPI에 가벼운 ping (실패해도 무시)
+      try {
+        await fetchWithTimeout(`${FASTAPI_BASE}/`, { method: "GET" }, 3000);
+      } catch {
+        // 무시 — 본 요청에서 어차피 재시도함
+      }
+
+      const BACKOFFS_MS = [0, 5000, 10000]; // 1차 즉시, 2차 5초 후, 3차 10초 후
+      let result: any = null;
+      let lastErr: any = null;
+      for (let attempt = 0; attempt < BACKOFFS_MS.length; attempt++) {
+        if (BACKOFFS_MS[attempt] > 0) {
+          console.warn(`[analyze-weld] ${attempt}차 실패 → ${BACKOFFS_MS[attempt] / 1000}초 후 재시도...`);
+          await new Promise((r) => setTimeout(r, BACKOFFS_MS[attempt]));
+        }
+        try {
+          result = await callFastApiAnalyze(callParams);
+          if (attempt > 0) console.log(`[analyze-weld] ${attempt + 1}차 시도에서 성공`);
+          break;
+        } catch (e: any) {
+          lastErr = e;
+          // 400 = 사용자 입력 문제 (잘못된 사진/마커 미검출) → 재시도 의미 없음
+          if (e?.status === 400) {
+            console.warn(`[analyze-weld] 사용자 입력 문제 (재시도 안 함): ${e.message}`);
+            break;
+          }
+          console.warn(`[analyze-weld] ${attempt + 1}차 시도 실패: ${e.message}`);
+        }
+      }
+      if (!result) throw lastErr ?? new Error("FastAPI 호출 실패 (원인 불명)");
+
+      console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
+      res.json(result);
+
+    } catch (err: any) {
+      // 사용자 입력 문제 (400) — FastAPI의 사용자 친화 메시지를 그대로 전달
+      if (err?.status === 400) {
+        let userMessage = "용접 사진을 인식하지 못했습니다. 선명한 용접 사진을 다시 업로드해 주세요.";
+        let code = "INVALID_WELD_PHOTO";
+        try {
+          const parsed = JSON.parse(err.body ?? "{}");
+          if (parsed?.message) userMessage = parsed.message;
+          if (parsed?.code) code = parsed.code;
+        } catch {}
+        console.warn(`[analyze-weld] 잘못된 사진 — 사용자에게 안내: ${userMessage}`);
+        return res.status(400).json({ error: code, message: userMessage });
+      }
+      console.error(`[analyze-weld] 최종 실패 | 오류: ${err.message}`);
+      // 명확한 503 반환 → 모바일 앱이 Alert 표시 (폴백 데이터 혼선 방지)
+      res.status(503).json({
+        error: "AI_ANALYSIS_FAILED",
+        message: "AI 분석 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+        detail: err.message?.slice(0, 200),
+      });
+    }
+  });
+}

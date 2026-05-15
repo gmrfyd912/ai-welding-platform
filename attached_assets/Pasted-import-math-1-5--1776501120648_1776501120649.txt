@@ -1,0 +1,168 @@
+import math
+
+# ==========================================
+# [모듈 1.5] 비드 품질 수학적 정밀 분석 로직
+# ==========================================
+def analyze_bead_quality(polygon, mm_ratio):
+    """비드 폴리곤을 분석하여 폭 편차와 직진도를 계산합니다."""
+    if not polygon or len(polygon) < 5:
+        return {"width_variation_mm": 0, "max_width_mm": 0, "min_width_mm": 0, "straightness_error_mm": 0}
+
+    # 1. 직진도 (지렁이 비드) 계산
+    max_dist = 0
+    pt1, pt2 = polygon[0], polygon[-1]
+    # 폴리곤 내에서 가장 멀리 떨어진 두 점(시작과 끝) 찾기
+    for p1 in polygon:
+        for p2 in polygon:
+            d = math.hypot(p1['x'] - p2['x'], p1['y'] - p2['y'])
+            if d > max_dist:
+                max_dist = d
+                pt1, pt2 = p1, p2
+                
+    # 두 점을 지나는 직선 방정식: Ax + By + C = 0
+    A = pt2['y'] - pt1['y']
+    B = pt1['x'] - pt2['x']
+    C = (pt2['x'] * pt1['y']) - (pt1['x'] * pt2['y'])
+    denominator = math.hypot(A, B)
+    
+    straightness_px = 0
+    if denominator != 0:
+        for pt in polygon:
+            dist = abs(A * pt['x'] + B * pt['y'] + C) / denominator
+            if dist > straightness_px:
+                straightness_px = dist
+                
+    straightness_error_mm = round(straightness_px * mm_ratio, 2)
+
+    # 2. 비드 폭 일정성 (넓어졌다 좁아졌다) 계산
+    xs = [p['x'] for p in polygon]
+    ys = [p['y'] for p in polygon]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    
+    # 가로/세로 방향 판단 후 10등분하여 폭 측정
+    is_horizontal = (max_x - min_x) > (max_y - min_y)
+    segments = 10
+    widths = []
+    
+    if is_horizontal:
+        step = (max_x - min_x) / segments
+        for i in range(segments):
+            s_min, s_max = min_x + i * step, min_x + (i + 1) * step
+            seg_ys = [p['y'] for p in polygon if s_min <= p['x'] <= s_max]
+            if seg_ys: widths.append(max(seg_ys) - min(seg_ys))
+    else:
+        step = (max_y - min_y) / segments
+        for i in range(segments):
+            s_min, s_max = min_y + i * step, min_y + (i + 1) * step
+            seg_xs = [p['x'] for p in polygon if s_min <= p['y'] <= s_max]
+            if seg_xs: widths.append(max(seg_xs) - min(seg_xs))
+
+    if not widths:
+        return {"width_variation_mm": 0, "max_width_mm": 0, "min_width_mm": 0, "straightness_error_mm": straightness_error_mm}
+
+    max_width_mm = round(max(widths) * mm_ratio, 2)
+    min_width_mm = round(min(widths) * mm_ratio, 2)
+    width_variation_mm = round(max_width_mm - min_width_mm, 2)
+
+    return {
+        "width_variation_mm": width_variation_mm,
+        "max_width_mm": max_width_mm,
+        "min_width_mm": min_width_mm,
+        "straightness_error_mm": straightness_error_mm
+    }
+
+
+def process_vision_data(roboflow_json):
+    predictions = roboflow_json.get("predictions", [])
+    marker_polygon = None
+    weld_bead_polygon = None
+    defects = []
+    
+    for pred in predictions:
+        class_name = pred['class']
+        polygon = pred.get('points', [])
+        
+        if class_name == "Reference_Marker":
+            marker_polygon = polygon
+        elif class_name == "Weld_Bead":
+            weld_bead_polygon = polygon
+        else:
+            defects.append({"type": class_name, "polygon": polygon, "confidence": pred['confidence']})
+            
+    if not marker_polygon:
+        raise ValueError("사진에서 30mm ArUco 마커를 찾을 수 없습니다. 마커가 포함되도록 다시 촬영해 주세요.")
+        
+    mm_ratio = calculate_pixel_to_mm_ratio(marker_polygon)
+    
+    # 결함 크기 환산
+    analyzed_defects = []
+    for defect in defects:
+        x_coords = [p['x'] for p in defect['polygon']]
+        y_coords = [p['y'] for p in defect['polygon']]
+        width_mm = (max(x_coords) - min(x_coords)) * mm_ratio
+        height_mm = (max(y_coords) - min(y_coords)) * mm_ratio
+        max_length_mm = round(math.sqrt(width_mm**2 + height_mm**2), 2)
+        
+        analyzed_defects.append({
+            "type": defect['type'],
+            "size_mm": max_length_mm
+        })
+        
+    # 비드 품질(폭, 직진도) 환산
+    bead_quality = analyze_bead_quality(weld_bead_polygon, mm_ratio)
+        
+    return {
+        "defects": analyzed_defects,
+        "bead_quality": bead_quality
+    }
+
+# ==========================================
+# [모듈 2] LLM 리포트 생성 로직 (프롬프트 업그레이드)
+# ==========================================
+async def generate_expert_report(process: str, vision_data: dict, ai_model: str):
+    defects = vision_data.get("defects", [])
+    bead = vision_data.get("bead_quality", {})
+    
+    defects_str = "\n".join([f"- {d['type']}: 최대 길이 약 {d['size_mm']}mm" for d in defects])
+    if not defects_str: defects_str = "- 특이 결함 없음 (양호함)"
+
+    prompt = f"""
+    당신은 20년 경력의 까다롭지만 실력 있는 대한민국 최고의 용접 명장입니다.
+    아래는 AI 비전 시스템이 측정한 {process} 용접 결과물의 정량적 데이터입니다.
+
+    [용접 비드 품질 측정 데이터]
+    - 최대 비드 폭: {bead.get('max_width_mm')}mm
+    - 최소 비드 폭: {bead.get('min_width_mm')}mm
+    - 비드 폭 편차 (넓어졌다 좁아진 차이): {bead.get('width_variation_mm')}mm
+    - 직진도 편차 (중심에서 뱀처럼 굽어진 정도): {bead.get('straightness_error_mm')}mm
+    
+    [감지된 외부 결함]
+    {defects_str}
+
+    [지시사항]
+    1. 비드 폭 편차가 2mm 이상이거나 직진도 편차가 크다면 운봉(위빙) 속도가 일정하지 않거나 자세가 불안정한 것입니다. 이 수치들을 구체적으로 언급하며 원인을 따끔하게 지적해주세요.
+    2. 발견된 외부 결함이 있다면 그 원인도 함께 분석해주세요.
+    3. 훈련생이 다음 시도에서 손의 떨림을 잡고 일정한 속도를 유지하기 위해 어떻게 자세(파지법 등)를 교정해야 하는지 실무적인 조언을 해주세요.
+    4. 현장 반장님이 직접 멘토링해 주는 듯한 따뜻하고 엄격한 톤앤매너(Vibe)의 마크다운으로 작성하세요.
+    """
+
+    if ai_model.lower() == "claude":
+        response = await anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=1000,
+            temperature=0.7,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.content[0].text
+    else:
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=1000,
+            temperature=0.7,
+            messages=[
+                {"role": "system", "content": "당신은 20년 경력의 용접 명장입니다."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choices[0].message.content

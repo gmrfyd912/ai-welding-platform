@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cobot Welding Defense - V15.0 (Ultimate Difficulty & New Defect)</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; margin: 0; background-color: #0b1319; color: white; user-select: none; overflow: hidden; width: 100vw; height: 100vh; }
+        
+        #viewport-container { width: 100%; height: 100%; overflow: auto; -webkit-overflow-scrolling: touch; position: relative; }
+        #scroll-area { position: relative; width: 1140px; height: 780px; transition: width 0.2s, height 0.2s; }
+        
+        #game-wrapper { position: absolute; top: 50px; left: 50px; width: 1040px; height: 680px; background-color: #1a252c; border: 4px solid #34495e; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.8); transform-origin: 0 0; transition: transform 0.2s ease-out; }
+        canvas { display: block; cursor: crosshair; background: linear-gradient(135deg, #1e2a35 0%, #111a22 100%); }
+        canvas { background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px); background-size: 30px 30px; }
+
+        /* 드래그 가능한 줌 컨트롤 UI */
+        #zoom-controls { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 1000; background: rgba(30, 42, 53, 0.7); padding: 10px; border-radius: 35px; border: 2px solid #7f8c8d; cursor: move; touch-action: none; }
+        .zoom-btn { width: 50px; height: 50px; border-radius: 50%; background: rgba(44, 62, 80, 0.9); color: #f1c40f; font-size: 24px; font-weight: bold; border: 2px solid #3498db; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; pointer-events: auto; }
+        .zoom-btn:active { background: #3498db; color: white; transform: scale(0.9); }
+        .zoom-btn span { font-size: 12px; margin-top: -2px; }
+
+        #top-ui { position: absolute; top: 0; left: 0; width: 100%; background: linear-gradient(to bottom, rgba(0,0,0,0.95), rgba(0,0,0,0.7)); padding: 10px 20px; box-sizing: border-box; display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; border-bottom: 2px solid #2c3e50; z-index: 5; align-items: center; }
+        .stat-group { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
+        
+        .hp-text { color: #e74c3c; font-size: 15px; }
+        .regen-bg { width: 100%; height: 6px; background: #333; border-radius: 3px; overflow: hidden; position: relative; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }
+        .regen-fill { height: 100%; background: #e67e22; width: 0%; transition: width 0.1s linear; }
+        
+        .wave-text { color: #3498db; font-size: 15px; }
+        .timer-text { color: #f39c12; font-size: 18px; text-shadow: 0 0 5px rgba(243,156,18,0.5); }
+        
+        .resource-text { color: #f1c40f; font-size: 15px; }
+        .quiz-stats { color: #2ecc71; font-size: 12px; }
+
+        .controls { display: flex; gap: 8px; }
+        .ctrl-btn { padding: 8px 12px; font-size: 13px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; color: white; transition: 0.2s; }
+        .ctrl-btn:hover { filter: brightness(1.2); }
+        .btn-speed { background: #8e44ad; }
+        .btn-play { background: #27ae60; }
+        .btn-pause { background: #f39c12; }
+        .btn-quit { background: #c0392b; }
+
+        #bottom-ui { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.8); padding: 8px; text-align: center; font-size: 13px; color: #bdc3c7; z-index: 5; pointer-events: none; border-top: 2px solid #2c3e50; }
+
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 30; flex-direction: column; justify-content: center; align-items: center; }
+        
+        #quiz-overlay { display: none; background: rgba(0,0,0,0.95); backdrop-filter: blur(5px); }
+        .quiz-box { background: #1e2a35; padding: 30px; border-radius: 10px; text-align: center; width: 80%; max-width: 800px; border: 2px solid #3498db; box-shadow: 0 0 30px rgba(52, 152, 219, 0.4); }
+        .quiz-category { color: #f1c40f; font-size: 14px; font-weight: bold; margin-bottom: 10px; border: 1px solid #f1c40f; display: inline-block; padding: 3px 10px; border-radius: 15px; }
+        #quiz-exp { display: none; margin-top: 15px; font-size: 14px; font-weight: bold; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 5px; line-height: 1.5; text-align: left; }
+        
+        .btn { padding: 12px 40px; margin: 15px; font-size: 20px; font-weight: bold; cursor: pointer; border: none; border-radius: 5px; transition: all 0.2s; color:white; }
+        .btn:active { transform: scale(0.95); }
+        .btn-o { background-color: #2ecc71; }
+        .btn-x { background-color: #e74c3c; }
+
+        #intro-overlay { display: flex; background: rgba(11, 19, 25, 0.95); z-index: 50; padding: 40px; box-sizing: border-box; text-align:center; }
+        #intro-overlay h1 { font-size: 36px; color: #f1c40f; margin-top: 0; text-shadow: 2px 2px 5px black; letter-spacing: 2px; }
+        .intro-content { display: flex; gap: 30px; width: 90%; margin-bottom: 30px; text-align: left; }
+        .intro-box { flex: 1; background: rgba(44, 62, 80, 0.8); padding: 25px; border-radius: 10px; border: 2px solid #34495e; }
+        .intro-box h3 { color: #3498db; margin-top: 0; border-bottom: 1px solid #34495e; padding-bottom: 10px; }
+        .intro-box p { color: #ecf0f1; font-size: 15px; line-height: 1.6; }
+        .intro-box ul { color: #bdc3c7; font-size: 14px; line-height: 1.8; padding-left: 20px; margin-bottom: 0; }
+        .intro-box li strong { color: #e67e22; }
+
+        #gameover-overlay { display: none; background: rgba(0, 0, 0, 0.6); z-index: 45; }
+        .gameover-box { background: rgba(30, 42, 53, 0.95); padding: 40px 60px; border-radius: 15px; text-align: center; border: 3px solid #e74c3c; box-shadow: 0 0 50px rgba(231, 76, 60, 0.6); animation: popIn 0.5s ease-out forwards; }
+        .gameover-box h2 { color: #e74c3c; font-size: 40px; margin: 0 0 10px 0; letter-spacing: 3px; text-shadow: 0 0 10px rgba(231, 76, 60, 0.5); }
+        .gameover-box h3 { color: #bdc3c7; margin: 0 0 20px 0; font-weight: normal; }
+        .stats-grid { display: grid; grid-template-columns: 1fr; gap: 15px; background: rgba(0,0,0,0.5); padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: left; }
+        .stats-item { font-size: 16px; color: #ecf0f1; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        .stats-item span { color: #f1c40f; font-weight: bold; font-size: 20px; float: right; }
+        @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+        .popup-menu { display: none; position: absolute; background: rgba(30, 42, 53, 0.95); border-radius: 8px; padding: 10px; z-index: 10; flex-direction: column; gap: 5px; width: 250px; box-shadow: 0 5px 20px rgba(0,0,0,0.6); }
+        #build-menu { border: 2px solid #3498db; }
+        #upgrade-menu { border: 2px solid #f1c40f; }
+        #base-menu { border: 2px solid #e74c3c; }
+
+        .upg-title { font-size: 14px; font-weight: bold; text-align: center; margin-bottom: 5px; border-bottom: 1px solid #7f8c8d; padding-bottom: 5px; }
+        .upg-btn { padding: 8px; font-size: 12px; font-weight: bold; cursor: pointer; background: #2c3e50; color: white; border: 1px solid #7f8c8d; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;}
+        .upg-btn:hover:not(:disabled) { filter: brightness(1.3); }
+        .upg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .upg-desc { display:block; font-size: 10px; color: #bdc3c7; text-align:left; margin-top:3px;}
+        .close-btn { background: #95a5a6 !important; color: white !important; text-align: center; display: block; margin-top: 5px; justify-content: center; }
+        .sell-btn { background: #c0392b !important; color: white !important; text-align: center; display: flex; margin-top: 5px; justify-content: space-between; }
+        
+        @media (max-width: 800px) {
+            .intro-content { flex-direction: column; }
+            #intro-overlay h1 { font-size: 26px; }
+            .btn { padding: 10px 20px; font-size: 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="viewport-container">
+    <div id="scroll-area">
+        <div id="game-wrapper">
+            <div id="top-ui">
+                <div class="stat-group">
+                    <div class="hp-text">🛡️ 기지 체력: <span id="base-hp">200</span>/200 <span id="bead-hp-ui" style="color:#bdc3c7; font-size:11px;"></span></div>
+                    <div class="regen-bg" title="열처리 추가 시 체력이 자동 회복됩니다."><div id="regen-fill" class="regen-fill"></div></div>
+                </div>
+                
+                <div class="stat-group" style="align-items: center;">
+                    <div class="wave-text">🌊 웨이브: <span id="wave-num">1</span> / 100</div>
+                    <div class="timer-text">⏱ 남은 시간: <span id="wave-timer">30</span>초</div>
+                </div>
+                
+                <div class="stat-group" style="align-items: flex-end;">
+                    <div class="resource-text">⚡ 자원: <span id="resources">300</span></div>
+                    <div class="quiz-stats">📝 퀴즈: <span id="quiz-correct">0</span> / <span id="quiz-total">0</span> 정답</div>
+                </div>
+
+                <div class="controls">
+                    <button class="ctrl-btn btn-speed" id="btn-speed" onclick="toggleSpeed()">▶ 속도 x1</button>
+                    <button class="ctrl-btn btn-play" id="btn-playpause" onclick="togglePause()">일시정지</button>
+                    <button class="ctrl-btn btn-quit" onclick="quitGame()">끝내기</button>
+                </div>
+            </div>
+            
+            <canvas id="gameCanvas" width="1040" height="680"></canvas>
+            
+            <div id="bottom-ui">왼쪽 벽면 클릭: <b>기지 업그레이드</b> | 빈 공간 클릭: <b>로봇 설치</b> | 로봇 클릭: <b>업그레이드 및 철거</b></div>
+
+            <div id="build-menu" class="popup-menu">
+                <div class="upg-title" style="color: #3498db;">로봇 설치</div>
+                <button class="upg-btn" onclick="buildTower('FCAW')" style="background:#d35400;">
+                    <div>FCAW (사거리 길고, 딜 약함)</div> <span>50⚡</span>
+                </button>
+                <button class="upg-btn" onclick="buildTower('GTAW')" style="background:#8e44ad;">
+                    <div>GTAW (사거리 짧고, 딜 강함)</div> <span>100⚡</span>
+                </button>
+                <button class="upg-btn close-btn" onclick="closeMenus()">취소</button>
+            </div>
+
+            <div id="upgrade-menu" class="popup-menu">
+                <div class="upg-title" id="upg-title" style="color: #f1c40f;">로봇 업그레이드</div>
+                <button class="upg-btn" id="btn-upg-current" onclick="buyUpgrade('current')">
+                    <div>⚡ 전류 <span class="upg-desc">데미지 증가</span></div> <span id="cost-current">40</span>
+                </button>
+                <button class="upg-btn" id="btn-upg-voltage" onclick="buyUpgrade('voltage')">
+                    <div>⚡ 전압 <span class="upg-desc">사거리 증가</span></div> <span id="cost-voltage">40</span>
+                </button>
+                <button class="upg-btn" id="btn-upg-gas" onclick="buyUpgrade('gas')">
+                    <div>💨 보호가스 <span class="upg-desc">플래시 데미지 추가</span></div> <span id="cost-gas">50</span>
+                </button>
+                <button class="upg-btn" id="btn-upg-filler" onclick="buyUpgrade('filler')">
+                    <div>⚙️ 용가재 <span class="upg-desc">적 둔화 증가</span></div> <span id="cost-filler">30</span>
+                </button>
+                <button class="upg-btn sell-btn" onclick="sellTower()">
+                    <div>💣 철거 (50% 환불)</div> <span id="refund-amt">+0⚡</span>
+                </button>
+                <button class="upg-btn close-btn" onclick="closeMenus()">닫기</button>
+            </div>
+
+            <div id="base-menu" class="popup-menu">
+                <div class="upg-title" id="base-title" style="color: #e74c3c;">Welding Zone 업그레이드</div>
+                <button class="upg-btn" id="btn-base-alloy" onclick="buyBaseUpgrade('alloy')">
+                    <div>🛡️ 합금원소 추가 <span class="upg-desc">기지 체력 즉시 회복</span></div> <span id="cost-base-alloy">80</span>
+                </button>
+                <button class="upg-btn" id="btn-base-bead" onclick="buyBaseUpgrade('bead')">
+                    <div>🧱 용접비드 추가 <span class="upg-desc">장애물 방어막 생성</span></div> <span id="cost-base-bead">100</span>
+                </button>
+                <button class="upg-btn" id="btn-base-notch" onclick="buyBaseUpgrade('notch')">
+                    <div>✂️ 노치제거 추가 <span class="upg-desc">피격 데미지 영구 감소</span></div> <span id="cost-base-notch">150</span>
+                </button>
+                <button class="upg-btn" id="btn-base-heat" onclick="buyBaseUpgrade('heat')">
+                    <div>🔥 열처리 추가 <span class="upg-desc">체력 자동 회복 활성화/가속</span></div> <span id="cost-base-heat">120</span>
+                </button>
+                <button class="upg-btn close-btn" onclick="closeMenus()">닫기</button>
+            </div>
+
+            <div id="quiz-overlay" class="overlay">
+                <div class="quiz-box">
+                    <h2 style="color: #3498db; margin-top: 0;">용접 & 협동로봇 이론 퀴즈 ⚠️</h2>
+                    <div id="quiz-cat-ui" class="quiz-category">카테고리</div>
+                    <p id="quiz-text" style="font-size: 20px; margin: 15px 0; line-height: 1.5; color: white;">문제 텍스트</p>
+                    <div id="quiz-buttons">
+                        <button class="btn btn-o" onclick="answerQuiz(true)">O (맞다)</button>
+                        <button class="btn btn-x" onclick="answerQuiz(false)">X (틀리다)</button>
+                    </div>
+                    <div id="quiz-exp">해설 내용</div>
+                    <button class="btn btn-o" id="btn-next-wave" style="display:none; width: 100%; margin: 15px 0 0 0;" onclick="resumeGame()">게임으로 복귀</button>
+                </div>
+            </div>
+
+            <div id="intro-overlay" class="overlay">
+                <h1>Cobot Welding Defense</h1>
+                <div class="intro-content">
+                    <div class="intro-box">
+                        <h3>📜 Story (스토리)</h3>
+                        <p>완벽하게 시공된 <strong>Welding Zone (웰딩존)</strong>을 파괴하기 위해 기공, 크랙은 물론 <strong>로봇에 자폭하는 [용착불량] 결함</strong>까지 무차별적으로 쳐들어오고 있습니다.</p>
+                        <p>당신은 최첨단 <strong>Cobot (협동로봇)</strong>을 지휘하여 이 치명적인 결함들로부터 기지와 로봇을 100 웨이브 동안 지켜내야 합니다.</p>
+                    </div>
+                    <div class="intro-box">
+                        <h3>🎮 How to Play (조작법)</h3>
+                        <ul>
+                            <li><strong>자원 획득:</strong> 웨이브 전/중간의 <strong>OX 퀴즈(2회)</strong>를 맞추거나 적을 제거하세요.</li>
+                            <li><strong>로봇 조작:</strong> 빈 공간 클릭(설치), 로봇 클릭(업그레이드). <strong style="color:#e74c3c;">※ 로봇도 HP가 깎이면 파괴됩니다!</strong></li>
+                            <li><strong>기지 방어:</strong> 왼쪽 웰딩존을 클릭하여 기지를 강화하세요.</li>
+                            <li><strong>신규 몬스터:</strong> 찌그러진 사각형 모양의 [용착불량] 결함은 로봇에 직접 자폭 피해를 입힙니다.</li>
+                        </ul>
+                    </div>
+                </div>
+                <button class="btn btn-play" onclick="startGame()" style="font-size: 26px; padding: 15px 80px;">게임 시작 (Start)</button>
+            </div>
+
+            <div id="gameover-overlay" class="overlay">
+                <div class="gameover-box">
+                    <h2>SYSTEM FAILURE</h2>
+                    <h3>기지가 완전히 파괴되었습니다.</h3>
+                    <div class="stats-grid">
+                        <div class="stats-item">최종 도달 Wave <span id="go-wave">1</span></div>
+                        <div class="stats-item">퀴즈 정답률 <span id="go-quiz">0/0</span></div>
+                        <div class="stats-item" style="border:none; margin-top:10px; font-size:20px;">🏅 최종 종합 평가 <span id="go-score" style="color:#2ecc71; font-size:26px;">100점</span></div>
+                    </div>
+                    <button class="btn btn-play" onclick="resetGame()" style="width: 100%; margin: 0;">다시하기 (Restart)</button>
+                </div>
+            </div>
+
+        </div> 
+    </div> 
+</div> 
+
+<div id="zoom-controls">
+    <button class="zoom-btn" onclick="zoomIn()">+</button>
+    <button class="zoom-btn" onclick="resetZoom()"><span>1:1</span></button>
+    <button class="zoom-btn" onclick="zoomOut()">-</button>
+</div>
+
+<script>
+    // 줌 컨트롤 UI 드래그 앤 드롭 로직 (PC & Mobile)
+    const zoomControls = document.getElementById('zoom-controls');
+    let isDragging = false; let dragOffsetX = 0, dragOffsetY = 0;
+
+    function startDrag(e) {
+        isDragging = true;
+        let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        const rect = zoomControls.getBoundingClientRect();
+        dragOffsetX = clientX - rect.left; dragOffsetY = clientY - rect.top;
+        zoomControls.style.right = 'auto'; zoomControls.style.bottom = 'auto'; 
+    }
+    function doDrag(e) {
+        if (!isDragging) return;
+        e.preventDefault(); 
+        let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        let newX = clientX - dragOffsetX; let newY = clientY - dragOffsetY;
+        newX = Math.max(0, Math.min(window.innerWidth - zoomControls.offsetWidth, newX));
+        newY = Math.max(0, Math.min(window.innerHeight - zoomControls.offsetHeight, newY));
+        zoomControls.style.left = newX + 'px'; zoomControls.style.top = newY + 'px';
+    }
+    function endDrag() { isDragging = false; }
+    zoomControls.addEventListener('mousedown', startDrag); window.addEventListener('mousemove', doDrag); window.addEventListener('mouseup', endDrag);
+    zoomControls.addEventListener('touchstart', startDrag, {passive: false}); window.addEventListener('touchmove', doDrag, {passive: false}); window.addEventListener('touchend', endDrag);
+
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let currentScale = 1.0;
+    const MIN_SCALE = 0.2; 
+    const MAX_SCALE = 1.5;
+
+    function applyZoom() {
+        const wrapper = document.getElementById('game-wrapper');
+        const scrollArea = document.getElementById('scroll-area');
+        wrapper.style.transform = `scale(${currentScale})`;
+        scrollArea.style.width = (1040 * currentScale + 100) + 'px';
+        scrollArea.style.height = (680 * currentScale + 100) + 'px';
+    }
+    function zoomIn() { if(currentScale < MAX_SCALE) { currentScale += 0.1; applyZoom(); } }
+    function zoomOut() { if(currentScale > MIN_SCALE) { currentScale -= 0.1; applyZoom(); } }
+    function resetZoom() { currentScale = 1.0; applyZoom(); }
+    window.onload = function() { if(window.innerWidth < 1100) { currentScale = Math.max(MIN_SCALE, window.innerWidth / 1140); applyZoom(); } };
+
+    // 게임 전역 상태
+    let gameState = {};
+    let towers = []; let enemies = []; let projectiles = []; let particles = []; 
+    let baseCracks = []; let quizBag = []; 
+
+    const allQuizzes = [
+        { cat: "협동로봇의 개요", q: "협동로봇이란 사람과 작업 공간을 공유하고 이동, 설치, 운영이 용이한 로봇이다.", a: true, exp: "충돌 감지 기능이 내장되어 Safety Fence 없이 사람과 협업이 가능합니다." },
+        { cat: "협동로봇의 개요", q: "협동로봇은 사람과 작업 공간을 분리해야 하며, 설치 위치를 변경하기 어려운 고정형 로봇이다.", a: false, exp: "충돌 감지 기능이 내장되어 Safety Fence 없이 사람과 협업이 가능하며, 가벼워 재배치가 용이합니다." },
+        { cat: "센싱 기술", q: "협동로봇에는 비전센싱, 터치센싱, 아크센싱으로 용접선을 추출할 수 있다.", a: true, exp: "외부 센서와 연동하여 실시간으로 용접선의 편차를 보정하고 추적(Seam tracking)할 수 있습니다." },
+        { cat: "센싱 기술", q: "협동로봇 용접 시스템에서는 절대 좌표값으로만 용접 경로를 인식한다.", a: false, exp: "Vision Sensing 등 외부 센서와 연동하여 실시간으로 편차를 보정하고 추적할 수 있습니다." },
+        { cat: "협동로봇 브랜드", q: "우리가 사용하는 주력 협동로봇 브랜드는 Universal Robot이다.", a: true, exp: "현재 훈련 과정에서는 Universal Robot 장비를 주력으로 운용하고 있습니다." },
+        { cat: "협동로봇 브랜드", q: "우리가 사용하는 주력 협동로봇 브랜드는 HD현대 로보틱스이다.", a: false, exp: "현재 훈련 과정에서는 Universal Robot 장비를 주력으로 운용하고 있습니다." },
+        { cat: "적용처", q: "협동로봇 주요 적용처에는 제조업, 물류, 서비스업, 농업 등이다.", a: true, exp: "고하중 모델의 출시로 전 산업 분야에 광범위하게 적용되고 있습니다." },
+        { cat: "적용처", q: "협동로봇은 Payload의 한계로 인해 오직 서비스업 및 연구용으로만 제한적으로 사용된다.", a: false, exp: "고하중 모델의 출시로 제조업, 물류, 농업 등 전 산업 분야에 광범위하게 적용되고 있습니다." },
+        { cat: "활용", q: "협동로봇은 Pick&Place, 검사, 도장, 용접, AGV, AMR 등에 활용 가능하다.", a: true, exp: "AGV 상부에 탑재되어 주행과 조작을 동시에 수행하는 모바일 매니퓰레이터로도 쓰입니다." },
+        { cat: "활용", q: "협동로봇은 단일 작업만 수행하므로 AGV나 AMR에 결합하여 운영할 수 없다.", a: false, exp: "AGV나 AMR 상부에 탑재되어 자율 주행과 로봇 팔 조작을 동시에 수행하는 모바일 매니퓰레이터로 활용 가능합니다." },
+        { cat: "동향", q: "용접 자동화 기술 동향을 보면 협동로봇기술은 증가하는 추세이다.", a: true, exp: "용접 인력 부족과 다품종 소량 생산 전환으로 자동화 수요는 폭발적으로 증가하고 있습니다." },
+        { cat: "동향", q: "용접 자동화 기술 동향을 보면 협동로봇기술은 감소하는 추세이다.", a: false, exp: "용접 인력 부족과 다품종 소량 생산 체제 전환으로 협동로봇 자동화 수요는 폭발적으로 증가하고 있습니다." },
+        { cat: "구성 요소", q: "협동로봇 시스템은 본체, 제어기, 팬던트, 피더기, 로봇팔, 툴브라켓, 어스케이블로 구성된다.", a: true, exp: "로봇을 제어하는 Controller와 전원 장치인 본체 등이 통신으로 연결되어 구성됩니다." },
+        { cat: "구성 요소", q: "용접 전원 장치와 로봇 제어기는 물리적으로 하나의 케이스에 통합된 일체형 모듈이다.", a: false, exp: "로봇을 제어하는 Controller와 용접 아크를 발생시키는 Power Source는 물리적으로 분리되어 연결됩니다." },
+        { cat: "용접기 본체", q: "용접기 본체는 에너지를 생성하고 전류/전압을 정밀 제어하는 시스템이다.", a: true, exp: "본체 내부에 Inverter 제어 회로가 탑재되어 정밀 제어합니다." },
+        { cat: "용접기 본체", q: "용접기 본체는 단순 변압기이며, 출력 전류 파형 제어는 로봇 제어기가 전담한다.", a: false, exp: "본체 내부에 Inverter 제어 회로가 탑재되어 전류, 전압 및 파형을 자체적으로 정밀 제어합니다." },
+        { cat: "제어기", q: "협동로봇 제어기는 동작 알고리즘을 처리하고 통신을 관리하는 두뇌 역할이다.", a: true, exp: "팬던트는 인터페이스일 뿐, 모든 궤적 연산과 제어는 제어기가 수행합니다." },
+        { cat: "제어기", q: "실제 궤적 연산과 충돌 방지 로직은 팬던트 내부에서 계산된다.", a: false, exp: "팬던트는 HMI 인터페이스일 뿐, 모든 궤적 연산과 안전 제어 등 두뇌 역할은 제어기(Controller)가 수행합니다." },
+        { cat: "팬던트", q: "팬던트는 로봇을 조작하거나 프로그래밍 할 수 있는 휴대용 터치패드이다.", a: true, exp: "팬던트 자체만으로 조작, 설정, 프로그래밍을 독립적으로 수행할 수 있습니다." },
+        { cat: "팬던트", q: "팬던트는 모니터링 전용이며 프로그래밍을 위해서는 반드시 외부 PC를 연결해야 한다.", a: false, exp: "팬던트 자체만으로 로봇 조작, 파라미터 설정 및 모든 프로그래밍을 독립적으로 수행할 수 있습니다." },
+        { cat: "피더기", q: "피더기는 용접 와이어를 일정한 속도로 토치까지 원활하게 공급하는 장치이다.", a: true, exp: "통신 명령에 따라 구간별로 송급 속도를 가변적으로 정밀 제어합니다." },
+        { cat: "피더기", q: "피더기는 전원을 켜면 고정된 속도로만 일정한 회전을 하는 장치이다.", a: false, exp: "제어기 통신 명령에 따라 용접 구간별로 최적화된 Wire Feeding 속도를 가변적으로 정밀 제어합니다." },
+        { cat: "툴 브라켓", q: "툴 브라켓은 로봇 팔 끝단에 용접 토치를 고정하는 장치이다.", a: true, exp: "전기적 절연 구조를 갖춰 로봇 본체를 보호하며 토치를 견고하게 고정합니다." },
+        { cat: "툴 브라켓", q: "툴 브라켓은 용접 대전류를 로봇 팔 내부로 흐르게 하는 전기적 도체 역할을 한다.", a: false, exp: "대전류나 노이즈가 로봇 본체로 유입되는 것을 막기 위해 반드시 전기적으로 절연(Insulation) 구조를 갖춰야 합니다." },
+        { cat: "어스 케이블", q: "어스케이블은 기기와 모재 사이에 전기 회로를 완성하는 접지용 케이블이다.", a: true, exp: "폐회로(Closed Loop)를 완성하는 필수 전도체입니다." },
+        { cat: "어스 케이블", q: "어스케이블은 작업자 감전 예방용이며, 아크 회로와는 무관하다.", a: false, exp: "전류가 용접기에서 토치를 거쳐 모재로 흐른 뒤 다시 돌아가는 폐회로(Closed Loop)를 완성하는 필수 전도체입니다." },
+        { cat: "크레이터", q: "크레이터 설정은 용접 종료 지점의 파인 홈을 채우기 위한 마무리 기능이다.", a: true, exp: "용접 종료 시 파인 홈(수축공)을 채우기 위해 전류/전압을 낮춥니다." },
+        { cat: "크레이터", q: "크레이터 설정 기능은 시작 지점의 초기 Spatter를 줄이기 위한 기능이다.", a: false, 초: "시작 지점 제어는 Arc Start이며, Crater는 용접 종료 시 수축공을 채우는 마무리 기능입니다." },
+        { cat: "안전 평가", q: "협동로봇은 위험성 평가를 거친 후 안전 펜스 설치의 예외를 적용받을 수 있다.", a: true, exp: "충돌 감지 등 본질적 안전 기능이 있어, 평가를 통해 펜스 없이 운영 가능합니다." }
+    ];
+
+    const TOWER_SPECS = {
+        FCAW: { color: '#e67e22', range: 250, cd: 40, baseDmg: 12, cost: 50, splashBase: 50 },
+        GTAW: { color: '#9b59b6', range: 140, cd: 25, baseDmg: 35, cost: 100, splashBase: 0 }
+    };
+
+    // ★ 스펙 수정: 용착불량(Fusion) 추가 및 밸런스(속도) 상향
+    const ENEMY_SPECS = {
+        Spatter:  { label: '스패터', hp: 30, speed: 2.2, radius: 7, reward: 5, color: '#e74c3c', dmg: 5 },
+        Porosity: { label: '기공', hp: 60, speed: 1.6, radius: 12, reward: 10, color: '#2ecc71', dmg: 15 },
+        Undercut: { label: '언더컷', hp: 120, speed: 1.2, radius: 14, reward: 15, color: '#7f8c8d', dmg: 30 },
+        Overlap:  { label: '오버랩', hp: 200, speed: 1.0, radius: 15, reward: 20, color: '#8e44ad', dmg: 40 },
+        Fusion:   { label: '용착불량', hp: 80, speed: 2.5, radius: 13, reward: 20, color: '#f39c12', dmg: 40 }, // 신규 자폭몹
+        Crack:    { label: '크랙 (보스)', hp: 1500, speed: 0.6, radius: 28, reward: 100, color: '#c0392b', dmg: 100 }
+    };
+
+    function initGameData() {
+        gameState = { 
+            status: 'standby', resources: 300, speed: 1, 
+            baseMaxHp: 200, baseHp: 200,
+            beadShield: 0, notchLv: 0, heatLv: 0, regenProgress: 0,
+            wave: 0, frameCount: 0, waveTimerFrames: 0, bossSpawned: false,
+            quizTotal: 0, quizCorrect: 0, penaltyActive: false, 
+            midQuizTriggered: false, fusionToSpawn: 0, // 용착불량 스폰 카운터
+            selectedTower: null, buildTargetPos: null 
+        };
+        towers = []; enemies = []; projectiles = []; particles = []; baseCracks = [];
+        quizBag = [...allQuizzes].sort(() => Math.random() - 0.5);
+
+        for(let i=0; i<25; i++) {
+            let pts = [{x: 5 + Math.random()*50, y: 30 + Math.random()*620}];
+            let segments = 3 + Math.floor(Math.random()*4);
+            let angle = (Math.random() - 0.5) * Math.PI;
+            for(let j=0; j<segments; j++) {
+                angle += (Math.random()-0.5) * 1.5; 
+                let len = 8 + Math.random()*20;
+                let nx = pts[pts.length-1].x + Math.cos(angle)*len;
+                let ny = pts[pts.length-1].y + Math.sin(angle)*len;
+                nx = Math.max(2, Math.min(75, nx)); 
+                pts.push({x: nx, y: ny});
+            }
+            baseCracks.push({ pts: pts, thresh: 0.1 + Math.random() * 0.8 });
+        }
+        updateUI();
+        document.getElementById('btn-speed').innerText = '▶ 속도 x1';
+        document.getElementById('btn-playpause').innerText = '일시정지';
+        document.getElementById('btn-playpause').className = 'ctrl-btn btn-play';
+    }
+
+    function drawEnemy(ctx, e) {
+        ctx.translate(e.x, e.y); ctx.fillStyle = e.color;
+        if (e.type === 'Spatter') { ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill(); } 
+        else if (e.type === 'Porosity') {
+            ctx.fillRect(-e.radius, -e.radius, e.radius*2, e.radius*2); ctx.fillStyle = '#111';
+            ctx.beginPath(); ctx.arc(-5, -5, 2.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(5, 5, 2.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(-4, 4, 1.5, 0, Math.PI*2); ctx.fill();
+        } else if (e.type === 'Undercut') {
+            ctx.fillRect(-e.radius, -e.radius, e.radius*2, e.radius*2);
+            ctx.fillStyle = '#111'; ctx.fillRect(-e.radius, -2, e.radius*2, 4);
+        } else if (e.type === 'Overlap') {
+            ctx.beginPath(); ctx.arc(-e.radius/2.5, 0, e.radius*0.7, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(e.radius/2.5, 0, e.radius*0.7, 0, Math.PI*2); ctx.fill();
+        } else if (e.type === 'Fusion') {
+            // ★ 신규 결함: 용착불량 (찌그러진 다각형)
+            ctx.beginPath();
+            let r = e.radius;
+            ctx.moveTo(-r, -r + 2);
+            ctx.lineTo(0, -r - 4);
+            ctx.lineTo(r, -r + 3);
+            ctx.lineTo(r + 4, 0);
+            ctx.lineTo(r - 2, r);
+            ctx.lineTo(-2, r + 5);
+            ctx.lineTo(-r, r - 1);
+            ctx.lineTo(-r - 3, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5; ctx.stroke();
+        } else if (e.type === 'Crack') {
+            ctx.fillRect(-e.radius, -e.radius, e.radius*2, e.radius*2);
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(-e.radius, -e.radius/2); ctx.lineTo(-e.radius/2, 2); ctx.lineTo(e.radius/2, -8); ctx.lineTo(e.radius, e.radius/2); ctx.stroke();
+        }
+        ctx.fillStyle = '#ecf0f1'; ctx.font = '12px Malgun Gothic bold'; ctx.textAlign = 'center';
+        ctx.fillText(e.label, 0, -e.radius - 8); ctx.textAlign = 'left';
+        ctx.translate(-e.x, -e.y);
+    }
+
+    canvas.addEventListener('click', (e) => {
+        if (gameState.status !== 'playing') return;
+        const rect = canvas.getBoundingClientRect();
+        
+        const mx = (e.clientX - rect.left) / currentScale; 
+        const my = (e.clientY - rect.top) / currentScale;
+
+        if(mx < 90) { openBaseMenu(mx, my); return; }
+        
+        let clickedTower = towers.find(t => Math.hypot(t.x - mx, t.y - my) < 35);
+        if (clickedTower) { openUpgradeMenu(clickedTower, mx, my); } 
+        else {
+            if (!towers.some(t => Math.hypot(t.x - mx, t.y - my) < 30)) { openBuildMenu(mx, my); } 
+            else { closeMenus(); }
+        }
+    });
+
+    function positionMenu(menu, mx, my) {
+        menu.style.display = 'flex';
+        let px = mx + 15, py = my + 15;
+        if (px + 250 > 1040) px = mx - 265;
+        if (py + 250 > 680) py = my - 265;
+        menu.style.left = `${px}px`; menu.style.top = `${py}px`;
+    }
+
+    function openBuildMenu(mx, my) { closeMenus(); gameState.buildTargetPos = {x: mx, y: my}; positionMenu(document.getElementById('build-menu'), mx, my); }
+    function openUpgradeMenu(tower, mx, my) { closeMenus(); gameState.selectedTower = tower; refreshUpgradeMenu(); positionMenu(document.getElementById('upgrade-menu'), mx, my); }
+    function openBaseMenu(mx, my) { closeMenus(); refreshBaseMenu(); positionMenu(document.getElementById('base-menu'), mx, my); }
+    function closeMenus() { document.getElementById('build-menu').style.display = 'none'; document.getElementById('upgrade-menu').style.display = 'none'; document.getElementById('base-menu').style.display = 'none'; gameState.selectedTower = null; gameState.buildTargetPos = null; }
+
+    window.startGame = function() {
+        document.getElementById('intro-overlay').style.display = 'none';
+        gameState.status = 'playing';
+        if(gameState.wave === 0) startNextWave();
+        requestAnimationFrame(gameLoop);
+    }
+
+    window.resetGame = function() {
+        document.getElementById('gameover-overlay').style.display = 'none';
+        document.getElementById('intro-overlay').style.display = 'flex'; 
+        initGameData(); 
+    }
+    
+    window.toggleSpeed = function() {
+        gameState.speed = (gameState.speed % 3) + 1; 
+        document.getElementById('btn-speed').innerText = `▶ 속도 x${gameState.speed}`;
+    }
+
+    window.togglePause = function() {
+        if(gameState.status === 'playing') {
+            gameState.status = 'paused';
+            document.getElementById('btn-playpause').innerText = '▶ 계속하기';
+            document.getElementById('btn-playpause').className = 'ctrl-btn btn-play';
+        } else if (gameState.status === 'paused') {
+            gameState.status = 'playing';
+            document.getElementById('btn-playpause').innerText = '⏸ 일시정지';
+            document.getElementById('btn-playpause').className = 'ctrl-btn btn-pause';
+            requestAnimationFrame(gameLoop);
+        }
+    }
+    
+    window.quitGame = function() { if(confirm('게임을 종료하시겠습니까?')) triggerGameOver(true); }
+
+    window.buyBaseUpgrade = function(type) {
+        let cost = getBaseUpgCost(type);
+        if (gameState.resources >= cost) {
+            gameState.resources -= cost;
+            if(type === 'alloy') { gameState.baseHp = Math.min(gameState.baseMaxHp, gameState.baseHp + 50); } 
+            else if (type === 'bead') { gameState.beadShield += 100; } 
+            else if (type === 'notch') { gameState.notchLv++; } 
+            else if (type === 'heat') { gameState.heatLv++; }
+            updateUI(); refreshBaseMenu();
+        }
+    }
+    function getBaseUpgCost(type) { if(type==='alloy') return 80; if(type==='bead') return 100; if(type==='notch') return 150 + (gameState.notchLv * 50); if(type==='heat') return 120 + (gameState.heatLv * 40); }
+    function refreshBaseMenu() {
+        document.getElementById('btn-base-alloy').disabled = (gameState.resources < 80 || gameState.baseHp >= gameState.baseMaxHp);
+        document.getElementById('btn-base-bead').disabled = (gameState.resources < 100);
+        document.getElementById('cost-base-notch').innerText = getBaseUpgCost('notch'); document.getElementById('btn-base-notch').disabled = (gameState.resources < getBaseUpgCost('notch'));
+        document.getElementById('cost-base-heat').innerText = getBaseUpgCost('heat'); document.getElementById('btn-base-heat').disabled = (gameState.resources < getBaseUpgCost('heat'));
+    }
+
+    // ★ 로봇 체력 속성 부여 (hp: 100)
+    window.buildTower = function(type) {
+        if (gameState.resources >= TOWER_SPECS[type].cost) {
+            gameState.resources -= TOWER_SPECS[type].cost;
+            towers.push({ 
+                x: gameState.buildTargetPos.x, y: gameState.buildTargetPos.y, 
+                type: type, hp: 100, maxHp: 100, cooldown: 0, angle: 0, 
+                upg: { current: 0, voltage: 0, gas: 0, filler: 0 }, 
+                torch_end: {x: gameState.buildTargetPos.x, y: gameState.buildTargetPos.y} 
+            });
+            updateUI(); closeMenus();
+        }
+    };
+    function getUpgCost(type, lv) { if(type==='current'||type==='voltage') return 40 + lv*20; if(type==='gas') return 50 + lv*25; return 30 + lv*15; }
+    
+    window.buyUpgrade = function(upgType) {
+        let t = gameState.selectedTower; if(!t) return;
+        let cost = getUpgCost(upgType, t.upg[upgType]);
+        if (gameState.resources >= cost) { gameState.resources -= cost; t.upg[upgType]++; updateUI(); refreshUpgradeMenu(); }
+    };
+    
+    function getTowerTotalCost(t) {
+        let total = TOWER_SPECS[t.type].cost;
+        let types = ['current', 'voltage', 'gas', 'filler'];
+        types.forEach(type => { for(let i=0; i<t.upg[type]; i++) total += getUpgCost(type, i); });
+        return total;
+    }
+    
+    window.sellTower = function() {
+        let t = gameState.selectedTower; if(!t) return;
+        let refund = Math.floor(getTowerTotalCost(t) / 2);
+        gameState.resources += refund;
+        towers = towers.filter(tower => tower !== t);
+        createFloatingText(t.x, t.y, `철거 +${refund}⚡`, "#f1c40f", 16);
+        updateUI(); closeMenus();
+    }
+
+    function refreshUpgradeMenu() {
+        let t = gameState.selectedTower; if(!t) return;
+        document.getElementById('upg-title').innerText = `${t.type} 로봇 (총 Lv.${t.upg.current + t.upg.voltage + t.upg.gas + t.upg.filler})`;
+        ['current', 'voltage', 'gas', 'filler'].forEach(type => { let c = getUpgCost(type, t.upg[type]); document.getElementById(`cost-${type}`).innerText = c; document.getElementById(`btn-upg-${type}`).disabled = (gameState.resources < c); });
+        document.getElementById('refund-amt').innerText = `+${Math.floor(getTowerTotalCost(t)/2)}⚡`;
+    }
+
+    function updateUI() {
+        document.getElementById('resources').innerText = gameState.resources;
+        document.getElementById('base-hp').innerText = Math.floor(gameState.baseHp);
+        document.getElementById('bead-hp-ui').innerText = gameState.beadShield > 0 ? ` (+비드보호: ${gameState.beadShield})` : '';
+        document.getElementById('wave-num').innerText = gameState.wave;
+        document.getElementById('wave-timer').innerText = Math.max(0, Math.ceil(gameState.waveTimerFrames / 60));
+        document.getElementById('quiz-total').innerText = gameState.quizTotal;
+        document.getElementById('quiz-correct').innerText = gameState.quizCorrect;
+        document.getElementById('regen-fill').style.width = gameState.regenProgress + '%';
+    }
+
+    function getNextQuiz() {
+        if(quizBag.length === 0) { quizBag = [...allQuizzes].sort(() => Math.random() - 0.5); }
+        return quizBag.pop();
+    }
+
+    function triggerQuiz() {
+        gameState.status = 'paused'; 
+        currentQuiz = getNextQuiz();
+        document.getElementById('quiz-cat-ui').innerText = `[ ${currentQuiz.cat} ]`;
+        document.getElementById('quiz-text').innerText = "Q. " + currentQuiz.q;
+        document.getElementById('quiz-exp').style.display = 'none';
+        document.getElementById('quiz-buttons').style.display = 'block';
+        document.getElementById('btn-next-wave').style.display = 'none';
+        document.getElementById('quiz-overlay').style.display = 'flex';
+        closeMenus();
+    }
+    
+    // ★ 무조건 해설(exp)을 노출하도록 수정 완료
+    window.answerQuiz = function(userAnswer) {
+        document.getElementById('quiz-buttons').style.display = 'none';
+        gameState.quizTotal++;
+        
+        let expText = currentQuiz.exp ? `\n\n[해설]\n${currentQuiz.exp}` : "";
+
+        if (userAnswer === currentQuiz.a) {
+            gameState.resources += 100;
+            gameState.quizCorrect++;
+            document.getElementById('quiz-exp').innerText = `✅ 정답입니다! (자원 +100)${expText}`;
+            document.getElementById('quiz-exp').style.color = '#2ecc71';
+        } else {
+            gameState.penaltyActive = true;
+            document.getElementById('quiz-exp').innerText = `❌ 오답입니다! (이번 웨이브 적 능력치 대폭 강화)${expText}`;
+            document.getElementById('quiz-exp').style.color = '#e74c3c';
+        }
+        document.getElementById('quiz-exp').style.display = 'block'; 
+        document.getElementById('btn-next-wave').style.display = 'block'; 
+        updateUI();
+    };
+    
+    window.resumeGame = function() { 
+        document.getElementById('quiz-overlay').style.display = 'none'; 
+        gameState.status = 'playing'; 
+        requestAnimationFrame(gameLoop); 
+    };
+
+    function startNextWave() {
+        gameState.wave++;
+        gameState.waveTimerFrames = 30 * 60; 
+        gameState.bossSpawned = false;
+        gameState.penaltyActive = false;
+        gameState.midQuizTriggered = false; // ★ 중간 퀴즈 플래그
+        
+        // ★ 용착불량 스폰 횟수 세팅
+        gameState.fusionToSpawn = gameState.wave < 10 ? 10 : gameState.wave;
+        
+        triggerQuiz();
+    }
+
+    function spawnNormalEnemy(isFusion = false) {
+        let type;
+        if (isFusion) {
+            type = 'Fusion';
+        } else {
+            let typesAvailable = ['Spatter'];
+            if(gameState.wave >= 2) typesAvailable.push('Porosity');
+            if(gameState.wave >= 4) typesAvailable.push('Undercut');
+            if(gameState.wave >= 6) typesAvailable.push('Overlap');
+            type = typesAvailable[Math.floor(Math.random() * typesAvailable.length)];
+        }
+        let spec = ENEMY_SPECS[type];
+        
+        // 난이도 상승 (체력 & 속도)
+        let diffMult = 1.0 + (gameState.wave * 0.15);
+        let speedMult = 1.0 + (gameState.wave * 0.02);
+        let totalHpMult = diffMult * (gameState.penaltyActive ? 1.5 : 1.0); 
+        
+        enemies.push({ 
+            x: canvas.width + 20, y: 80 + Math.random() * (canvas.height - 160), 
+            type: type, label: spec.label, hp: spec.hp * totalHpMult, maxHp: spec.hp * totalHpMult, 
+            speed: spec.speed * speedMult * (Math.random()*0.4 + 0.8),
+            radius: spec.radius, color: spec.color, reward: spec.reward, dmg: spec.dmg, slowTimer: 0 
+        });
+    }
+
+    function spawnBossSwarm() {
+        let spec = ENEMY_SPECS['Crack'];
+        let diffMult = 1.0 + (gameState.wave * 0.15);
+        let totalHpMult = diffMult * (gameState.penaltyActive ? 1.5 : 1.0); 
+        
+        let bossCount = 1 + Math.floor(gameState.wave / 10);
+        
+        let swarmTypes = ['Spatter'];
+        if (gameState.wave >= 5) swarmTypes.push('Porosity');
+        if (gameState.wave >= 15) swarmTypes.push('Undercut');
+        if (gameState.wave >= 25) { swarmTypes.push('Overlap'); swarmTypes.shift(); } 
+
+        for(let b=0; b<bossCount; b++) {
+            let bossX = canvas.width + 80 + (b * 150); 
+            let bossY = canvas.height / 2 + ((b - Math.floor(bossCount/2)) * 80);
+
+            let bossObj = { 
+                id: 'boss_' + gameState.frameCount + '_' + b,
+                x: bossX, y: bossY, 
+                type: 'Crack', label: spec.label, hp: spec.hp * totalHpMult, maxHp: spec.hp * totalHpMult, 
+                speed: spec.speed * (1.0 + gameState.wave * 0.01), radius: spec.radius, color: spec.color, reward: spec.reward, dmg: spec.dmg, slowTimer: 0 
+            };
+            enemies.push(bossObj);
+            
+            let swarmCount = 8 + Math.floor(gameState.wave * 0.6);
+            if(swarmCount > 24) swarmCount = 24; 
+
+            for(let i=0; i<swarmCount; i++) {
+                let sType = swarmTypes[Math.floor(Math.random() * swarmTypes.length)];
+                let sSpec = ENEMY_SPECS[sType];
+                
+                let angle = (i / swarmCount) * Math.PI * 2;
+                let dist = bossObj.radius + sSpec.radius + 15 + Math.random() * 10;
+                let offsetX = Math.cos(angle) * dist;
+                let offsetY = Math.sin(angle) * dist;
+
+                enemies.push({
+                    x: bossX + offsetX, y: bossY + offsetY, 
+                    type: sType, label: sSpec.label, hp: sSpec.hp * totalHpMult, maxHp: sSpec.hp * totalHpMult, 
+                    speed: bossObj.speed, 
+                    radius: sSpec.radius, color: sSpec.color, reward: sSpec.reward, dmg: sSpec.dmg, slowTimer: 0,
+                    bossRef: bossObj, offsetX: offsetX, offsetY: offsetY 
+                });
+            }
+        }
+    }
+
+    function drawAndCalculateRobot(ctx, t, spec, actualRange) {
+        let totalLv = t.upg.current + t.upg.voltage + t.upg.gas + t.upg.filler;
+        let scale = 0.33 + (totalLv * 0.015); 
+        const L1 = 45, L2 = 65, L3 = 55, J4L = 15;
+        const J1 = 0, J2 = -Math.PI/6, J3 = Math.PI/3, J4 = -Math.PI/6;
+
+        let cx = 0, cy = 0, ang = 0;
+        ang+=J1; cx+=L1*Math.cos(ang); cy+=L1*Math.sin(ang);
+        ang+=J2; cx+=L2*Math.cos(ang); cy+=L2*Math.sin(ang);
+        ang+=J3; cx+=L3*Math.cos(ang); cy+=L3*Math.sin(ang);
+        ang+=J4; cx+=J4L*Math.cos(ang); cy+=J4L*Math.sin(ang);
+
+        let J5_wx = t.x + cx * scale; let J5_wy = t.y + cy * scale;
+        let torch_l = 10 + (t.type === 'FCAW' ? 35 : 15);
+        t.torch_end = { x: J5_wx + Math.cos(t.angle) * torch_l * scale, y: J5_wy + Math.sin(t.angle) * torch_l * scale };
+
+        ctx.save(); ctx.translate(t.x, t.y); ctx.scale(scale, scale);
+        ctx.fillStyle = '#34495e'; ctx.fillRect(-12, -12, 24, 24); ctx.fillStyle = '#95a5a6'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+
+        let rang = 0;
+        const drawLink = (len) => { ctx.fillStyle = '#34495e'; ctx.rotate(rang); ctx.fillRect(0, -3.5, len, 7); ctx.translate(len, 0); ctx.fillStyle = spec.color; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); };
+        rang = J1; drawLink(L1); rang = J2; drawLink(L2); rang = J3; drawLink(L3);
+        ctx.fillStyle = '#34495e'; rang = J4; ctx.rotate(rang); ctx.fillRect(0, -2.5, J4L, 5); ctx.translate(J4L, 0); ctx.fillStyle = spec.color; ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fill();
+
+        ctx.rotate(t.angle - (J1+J2+J3+J4)); 
+        if (t.type === 'FCAW') { ctx.fillStyle = '#f39c12'; ctx.fillRect(5, -5, 15, 10); ctx.beginPath(); ctx.arc(10, -5, 8, 0, Math.PI*2); ctx.fillStyle = '#ecf0f1'; ctx.fill(); ctx.fillStyle = '#7f8c8d'; ctx.fillRect(20, -2.5, 10, 5); ctx.fillRect(30, -2.5, 5, 15); } 
+        else { ctx.fillStyle = '#f1c40f'; ctx.fillRect(5, -4, 15, 8); ctx.fillStyle = '#ffffff'; ctx.fillRect(20, -1, 10, 2); }
+        ctx.restore();
+
+        // ★ 로봇 HP 바 그리기
+        ctx.fillStyle = '#c0392b'; ctx.fillRect(t.x - 15, t.y + 20, 30, 4);
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(t.x - 15, t.y + 20, 30 * (t.hp / t.maxHp), 4);
+        
+        ctx.fillStyle = '#f1c40f'; ctx.font = '12px Arial bold'; ctx.fillText(`Lv.${totalLv}`, t.x - 14, t.y - 20 - (totalLv*2));
+        if (gameState.selectedTower === t) { ctx.beginPath(); ctx.arc(t.x, t.y, actualRange, 0, Math.PI * 2); ctx.strokeStyle = `rgba(255, 255, 255, 0.15)`; ctx.stroke(); }
+    }
+
+    function triggerGameOver(isQuit = false) {
+        gameState.status = 'gameover'; 
+        
+        for(let i=0; i<60; i++) {
+            particles.push({ x: 10 + Math.random()*70, y: Math.random()*650, r: 5 + Math.random()*25, color: '#2c3e50', life: 2.0, decay: 0.005, vx: (Math.random()-0.2)*15, vy: (Math.random()-0.5)*15, growth: 0, isPoly: true });
+            if(i%2==0) createFire(10 + Math.random()*60, Math.random()*650, 1.5);
+        }
+        let msg = isQuit ? "GAME ABORTED" : "SYSTEM FAILURE";
+        createFloatingText(canvas.width/2, canvas.height/2, msg, "#e74c3c", 60);
+        
+        let finalScore = gameState.quizTotal > 0 ? Math.round((gameState.quizCorrect / gameState.quizTotal) * 100) : 0;
+
+        setTimeout(() => { 
+            document.getElementById('go-wave').innerText = gameState.wave;
+            document.getElementById('go-quiz').innerText = `${gameState.quizCorrect}/${gameState.quizTotal}`;
+            document.getElementById('go-score').innerText = `${finalScore}점`;
+            
+            document.getElementById('go-score').style.color = finalScore >= 80 ? '#2ecc71' : (finalScore >= 50 ? '#f1c40f' : '#e74c3c');
+            
+            document.getElementById('gameover-overlay').style.display = 'flex';
+        }, 2000);
+    }
+
+    function createSmoke(x, y, intensity) {
+        let c = 80 - Math.floor(intensity * 50); 
+        particles.push({ x: x, y: y, r: 5 + Math.random()*10, color: `rgba(${c},${c},${c},0.7)`, life: 1.0, decay: 0.01 + Math.random()*0.01, vx: (Math.random()-0.5)*0.5, vy: -1 - Math.random()*1.5*intensity, growth: 0.2, isText: false });
+    }
+    function createFire(x, y, intensity) {
+        let colors = ['#f1c40f', '#e67e22', '#e74c3c'];
+        particles.push({ x: x, y: y, r: 8 + Math.random()*10*intensity, color: colors[Math.floor(Math.random()*colors.length)], life: 1.0, decay: 0.03 + Math.random()*0.03, vx: (Math.random()-0.5)*1.5, vy: -2 - Math.random()*2, growth: -0.2, isText: false });
+    }
+
+    function updatePlayingLogic() {
+        if (gameState.heatLv > 0 && gameState.baseHp > 0 && gameState.baseHp < gameState.baseMaxHp) {
+            gameState.regenProgress += (gameState.heatLv * 0.2); 
+            if(gameState.regenProgress >= 100) {
+                gameState.regenProgress = 0;
+                gameState.baseHp = Math.min(gameState.baseMaxHp, gameState.baseHp + 1);
+                createFloatingText(40, canvas.height/2, "+1", "#2ecc71", 20);
+            }
+        } else { gameState.regenProgress = 0; }
+
+        if (gameState.waveTimerFrames > 0) {
+            
+            // ★ 웨이브 중간(15초) 퀴즈 발동 로직
+            if (gameState.waveTimerFrames <= 15 * 60 && !gameState.midQuizTriggered) {
+                gameState.midQuizTriggered = true;
+                triggerQuiz();
+                return; // 퀴즈 창이 뜨면 이번 프레임 로직 정지
+            }
+
+            gameState.waveTimerFrames--;
+            if (gameState.frameCount % 60 === 0) updateUI();
+            
+            let spawnRate = Math.max(12, 80 - (gameState.wave * 3)); 
+            if (gameState.frameCount % spawnRate === 0) { spawnNormalEnemy(false); }
+            
+            // ★ 용착불량 분산 스폰 로직
+            if (gameState.fusionToSpawn > 0) {
+                let fusionInterval = Math.max(10, Math.floor((30 * 60) / (gameState.wave < 10 ? 10 : gameState.wave)));
+                if (gameState.waveTimerFrames % fusionInterval === 0) {
+                    spawnNormalEnemy(true); // true = 용착불량 스폰
+                    gameState.fusionToSpawn--;
+                }
+            }
+
+        } else if (!gameState.bossSpawned) {
+            updateUI(); 
+            spawnBossSwarm();
+            gameState.bossSpawned = true;
+        } else if (enemies.length === 0) {
+            startNextWave(); 
+        }
+
+        towers.forEach(t => {
+            let spec = TOWER_SPECS[t.type];
+            let actualRange = spec.range + (t.upg.voltage * 25);
+            let target = enemies.find(e => Math.hypot(e.x - t.x, e.y - t.y) < actualRange);
+            
+            if (target) {
+                t.angle += (Math.atan2(target.y - t.torch_end.y, target.x - t.torch_end.x) - t.angle) * 0.2; 
+                if (t.cooldown <= 0) {
+                    target.hp -= (spec.baseDmg + (t.upg.current * 15));
+                    let sSlow = t.upg.filler * 30;
+                    if(sSlow > 0) target.slowTimer = Math.max(target.slowTimer, sSlow);
+                    
+                    let sRad = spec.splashBase + (t.upg.gas * 20);
+                    if (sRad > 0) {
+                        let sDmg = t.upg.gas * 10;
+                        enemies.forEach(e => { if (e !== target && Math.hypot(e.x - target.x, e.y - target.y) < sRad) { e.hp -= (t.type === 'FCAW' ? (spec.baseDmg*0.5) : 0) + sDmg; if(sSlow > 0) e.slowTimer = Math.max(e.slowTimer, sSlow); } });
+                    }
+                    projectiles.push({ x: t.torch_end.x, y: t.torch_end.y, target: target, life: 3, color: spec.color });
+                    t.cooldown = spec.cd;
+                }
+            } else { t.angle += (0 - t.angle) * 0.05; }
+            t.cooldown--;
+        });
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i]; 
+            
+            if (e.bossRef && enemies.includes(e.bossRef)) {
+                e.x = e.bossRef.x + e.offsetX;
+                e.y = e.bossRef.y + e.offsetY;
+                let angle = Math.atan2(e.offsetY, e.offsetX);
+                let dist = Math.hypot(e.offsetX, e.offsetY);
+                angle += 0.06; 
+                e.offsetX = Math.cos(angle) * dist;
+                e.offsetY = Math.sin(angle) * dist;
+            } else {
+                if (e.bossRef) e.bossRef = null; 
+                let currentSpeed = e.speed;
+                if(e.slowTimer > 0) { e.slowTimer--; currentSpeed *= 0.4; }
+                e.x -= currentSpeed;
+            }
+
+            // ★ 용착불량 몬스터 로봇 충돌 자폭 로직
+            if (e.type === 'Fusion') {
+                let hitTower = towers.find(t => Math.hypot(t.x - e.x, t.y - e.y) < 30); // 충돌 반경
+                if (hitTower) {
+                    hitTower.hp -= e.dmg;
+                    createFire(e.x, e.y, 1.0);
+                    enemies.splice(i, 1);
+                    updateUI();
+                    
+                    if (hitTower.hp <= 0) {
+                        createEffect(hitTower.x, hitTower.y, '#e74c3c', 50, 1.5, 0.02); // 파괴 이펙트
+                        towers = towers.filter(t => t !== hitTower); // 로봇 철거됨 (환불 X)
+                        createFloatingText(hitTower.x, hitTower.y - 20, "ROBOT DESTROYED!", "#e74c3c", 16);
+                        closeMenus();
+                    } else {
+                        createFloatingText(hitTower.x, hitTower.y - 20, `HP -${e.dmg}`, "#e74c3c", 14);
+                    }
+                    continue; // 자폭했으므로 아래 기지 충돌 생략
+                }
+            }
+            
+            let hitTargetX = gameState.beadShield > 0 ? 95 : 80;
+            if (e.x < hitTargetX) {
+                if (gameState.beadShield > 0) { gameState.beadShield -= e.dmg; if(gameState.beadShield < 0) gameState.beadShield = 0; } 
+                else { gameState.baseHp -= Math.max(1, e.dmg - (gameState.notchLv * 2)); }
+                
+                enemies.splice(i, 1); updateUI();
+                if(gameState.baseHp <= 0) { triggerGameOver(); return; }
+                continue;
+            }
+        }
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i];
+            if(e.hp <= 0) {
+                if(e.type === 'Crack') { createEffect(e.x, e.y, '#c0392b', 80, 1.0, 0.02); }
+                gameState.resources += e.reward; updateUI(); enemies.splice(i, 1);
+            }
+        }
+    }
+
+    function updateParticleLogic() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let pt = particles[i];
+            pt.life -= pt.decay; 
+            if(pt.life <= 0) particles.splice(i, 1);
+            else {
+                pt.r += (pt.growth !== undefined) ? pt.growth : (pt.decay * 1.5);
+                if (pt.r < 0.1) pt.r = 0.1;
+                pt.x += pt.vx || 0; pt.y += pt.vy || 0;
+                if (pt.isPoly) pt.vy += 0.5; 
+            }
+        }
+    }
+
+    function gameLoop() {
+        if (gameState.status === 'paused') return;
+        
+        for(let step = 0; step < gameState.speed; step++) {
+            if(gameState.status === 'gameover') break; 
+            
+            gameState.frameCount++;
+            if (gameState.status === 'playing') updatePlayingLogic();
+            updateParticleLogic();
+        }
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#2c3e50'; ctx.fillRect(0, 0, 80, canvas.height);
+        
+        let hpRatio = gameState.baseHp / gameState.baseMaxHp;
+        let damageLevel = 1.0 - hpRatio; 
+        if (gameState.status === 'gameover') damageLevel = 1.5;
+
+        ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5;
+        baseCracks.forEach(c => {
+            if (hpRatio < c.thresh || gameState.status === 'gameover') {
+                ctx.beginPath(); ctx.moveTo(c.pts[0].x, c.pts[0].y);
+                for(let i=1; i<c.pts.length; i++) ctx.lineTo(c.pts[i].x, c.pts[i].y);
+                ctx.stroke();
+            }
+        });
+
+        if (damageLevel > 0.3 && gameState.frameCount % Math.max(1, Math.floor(10 - damageLevel*8)) === 0) createSmoke(10 + Math.random()*60, 50 + Math.random()*500, damageLevel);
+        if (damageLevel > 0.6 && gameState.frameCount % Math.max(1, Math.floor(6 - damageLevel*5)) === 0) createFire(20 + Math.random()*50, 50 + Math.random()*500, damageLevel);
+
+        ctx.fillStyle = '#ecf0f1'; ctx.font = '24px Arial bold';
+        ctx.save(); ctx.translate(45, canvas.height/2 + 80); ctx.rotate(-Math.PI/2); ctx.fillText('WELDING ZONE', 0, 0); ctx.restore();
+
+        if (gameState.beadShield > 0 && gameState.status === 'playing') {
+            ctx.fillStyle = '#e67e22'; ctx.fillRect(80, 0, 15, canvas.height);
+            ctx.fillStyle = '#d35400';
+            for(let i=0; i<canvas.height; i+=20) { ctx.beginPath(); ctx.arc(87, i, 7, 0, Math.PI*2); ctx.fill(); }
+        }
+
+        if(gameState.status === 'playing') {
+            towers.forEach(t => {
+                let spec = TOWER_SPECS[t.type];
+                let actualRange = spec.range + (t.upg.voltage * 25);
+                drawAndCalculateRobot(ctx, t, spec, actualRange);
+            });
+
+            enemies.forEach(e => {
+                drawEnemy(ctx, e);
+                ctx.fillStyle = '#c0392b'; ctx.fillRect(e.x - 15, e.y - e.radius - 20, 30, 4);
+                ctx.fillStyle = '#2ecc71'; ctx.fillRect(e.x - 15, e.y - e.radius - 20, 30 * (e.hp / e.maxHp), 4);
+            });
+        }
+
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            let p = projectiles[i];
+            if (enemies.includes(p.target)) {
+                ctx.beginPath(); ctx.moveTo(p.x, p.y);
+                let segments = 5; let dx = (p.target.x - p.x)/segments; let dy = (p.target.y - p.y)/segments;
+                for(let j=1; j<=segments; j++) { ctx.lineTo(p.x + dx*j + (j===segments?0:(Math.random()-0.5)*15), p.y + dy*j + (j===segments?0:(Math.random()-0.5)*15)); }
+                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2 + Math.random()*2; ctx.shadowBlur = 10; ctx.shadowColor = p.color; ctx.stroke(); ctx.shadowBlur = 0;
+            }
+            p.life--; if (p.life <= 0) projectiles.splice(i, 1);
+        }
+
+        particles.forEach(pt => {
+            ctx.globalAlpha = Math.max(0, pt.life);
+            ctx.fillStyle = pt.color;
+            if (pt.isText) { ctx.font = `${pt.size}px bold Arial`; ctx.fillText(pt.text, pt.x, pt.y); } 
+            else if (pt.isPoly) { ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pt.x+pt.r, pt.y+pt.r/2); ctx.lineTo(pt.x-pt.r/2, pt.y+pt.r); ctx.fill(); } 
+            else { ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill(); }
+        });
+        ctx.globalAlpha = 1.0; 
+
+        requestAnimationFrame(gameLoop);
+    }
+    
+    function createEffect(x, y, color, maxR, life = 1.0, decay = 0.05, vx=0, vy=0) { particles.push({ x: x, y: y, r: 2, maxR: maxR, color: color, life: life, decay: decay, vx:vx, vy:vy, isText: false }); }
+    function createFloatingText(x, y, text, color, size = 14) { particles.push({ x: x, y: y, text: text, color: color, life: 1.0, size: size, decay: 0.02, isText: true }); }
+
+    initGameData();
+</script>
+</body>
+</html>

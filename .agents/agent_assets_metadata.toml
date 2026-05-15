@@ -1,0 +1,32 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "XX4_sAfQgmh0V-KNVRqUP"
+uri = "file://전체소스코드.txt"
+type = "text"
+title = "전체 소스코드 (370KB, 41개 파일, 10,215 라인)"
+
+[[outputs]]
+id = "d6l6eMcZhHmQWPEOM9uMK"
+uri = "file://a.txt"
+type = "text"
+title = "AI 용접 진단 시스템 - 전체 소스코드 (최신)"
+
+[[outputs]]
+id = "AOuFMHZqdCSOpBTKUY998"
+uri = "file://marker_30mm.png"
+type = "image"
+title = "ArUco 마커 (DICT_6X6_250, ID 0) - 30mm용"
+
+[[outputs]]
+id = "n7-jNBieApD4-Ani04CxV"
+uri = "file://exports/today_questions.md"
+type = "text"
+title = "오늘의 학습 — 전체 196문제"
+
+[[outputs]]
+id = "18SwYB5UFt36Gpl5k7WeN"
+uri = "file://exports/ox_questions.md"
+type = "text"
+title = "OX 퀴즈 게임 — 전체 193문제"

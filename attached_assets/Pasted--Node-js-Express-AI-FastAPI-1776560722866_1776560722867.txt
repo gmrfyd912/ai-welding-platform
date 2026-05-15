@@ -1,0 +1,91 @@
+너에게 우리 서비스의 백엔드 아키텍처를 완전히 개편할 것을 지시한다. 기존의 Node.js(Express) 분석 로직을 폐기하고, 모든 AI 분석 및 계산 로직을 **FastAPI(Python)**로 통합한다. 다음 지시사항에 따라 파일 생성 및 수정을 진행해 줘.
+
+1. 삭제 및 환경 정리 (Express.js 백엔드)
+기존 Express.js 서버에서 Roboflow 데이터를 받아 GPT에게 점수를 '추정'하게 만들었던 3~7단계 라우터 로직과 프롬프트는 전부 삭제해.
+
+(만약 프론트엔드 서빙용으로 Express를 남겨둬야 한다면, AI 분석 라우터만 지우고 뼈대는 둬도 돼. 하지만 AI 연산은 무조건 FastAPI로 넘겨야 해.)
+
+Python 환경을 위해 requirements.txt에 fastapi, uvicorn, ultralytics, openai, python-multipart, requests를 추가해 줘.
+
+2. 새로 생성할 핵심 모듈 2개 (Python)
+아래 전달하는 두 개의 파이썬 코드를 한 글자도 빠짐없이 그대로 파일로 생성해.
+
+파일 1: welding_calculator.py (점수 및 결함 계산 엔진 - Hard Logic)
+
+Python
+import numpy as np
+
+def calculate_weld_score(bead_width_max, bead_width_min, defects):
+    # 비드 폭 편차 계산 및 점수화
+    width_variance = bead_width_max - bead_width_min
+    if width_variance < 1.0:
+        shape_score, shape_eval = 95, "우수"
+    elif 1.0 <= width_variance < 2.0:
+        shape_score, shape_eval = 85, "양호"
+    elif 2.0 <= width_variance < 3.0:
+        shape_score, shape_eval = 70, "주의"
+    else:
+        shape_score, shape_eval = 50, "불량"
+        
+    # 7대 결함 감점 로직 (선급 기준 반영)
+    penalty = 0
+    defect_list_ko = []
+    is_critical_fail = False
+    
+    for defect in defects:
+        d_type = defect.get('class', '').lower()
+        if d_type == 'crack':
+            penalty += 100
+            defect_list_ko.append("균열(-100점, 즉시 불합격)")
+            is_critical_fail = True
+        elif d_type in ['lack_of_fusion', 'lack_of_penetration', '용착불량']:
+            penalty += 20
+            defect_list_ko.append("용입/용착 불량(-20점)")
+        elif d_type == 'porosity': penalty += 10; defect_list_ko.append("기공(-10점)")
+        elif d_type == 'undercut': penalty += 10; defect_list_ko.append("언더컷(-10점)")
+        elif d_type == 'overlap': penalty += 10; defect_list_ko.append("오버랩(-10점)")
+        elif d_type == 'arc_strike': penalty += 10; defect_list_ko.append("아크 스트라이크(-10점)")
+        elif d_type == 'spatter': penalty += 5; defect_list_ko.append("스패터(-5점)")
+
+    final_score = max(0, min(100, shape_score - penalty))
+    is_pass = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
+    
+    return {
+        "final_score": final_score, "is_pass": is_pass,
+        "width_variance": round(width_variance, 2), "shape_eval": shape_eval,
+        "detected_defects": defect_list_ko
+    }
+파일 2: gpt_advisor.py (비동기 GPT-4o 분석 엔진 - Soft Logic)
+
+Python
+from openai import AsyncOpenAI
+import json
+
+client = AsyncOpenAI(api_key="YOUR_OPENAI_API_KEY")
+
+async def get_expert_advice(image_base64: str, weld_data: dict):
+    system_prompt = "당신은 30년 경력의 CWI 용접 검사관입니다. 제공된 수치를 바탕으로 원인 분석과 교정 방법만 JSON으로 응답하세요. 채점은 이미 완료되었으니 수치나 점수를 변경하지 마세요."
+    
+    defect_str = ', '.join(weld_data['detected_defects']) if weld_data['detected_defects'] else '결함 없음'
+    user_content = f"최종점수: {weld_data['final_score']}점, 편차: {weld_data['width_variance']}mm, 감지된 결함: {defect_str}. 이 물리적 데이터를 바탕으로 사진을 분석해 줘."
+
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        response_format={ "type": "json_object" },
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": [
+                {"type": "text", "text": user_content},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}", "detail": "high"}}
+            ]}
+        ]
+    )
+    return json.loads(response.choices[0].message.content)
+3. FastAPI 메인 서버 (main.py 또는 app.py) 업데이트
+새로 만든 위 두 파이썬 모듈을 import 해.
+
+클라이언트(앱)에서 사진을 업로드하면 API(/analyze-welding 등)가 호출되도록 엔드포인트를 만들어.
+
+실행 순서: 이미지 수신 -> Roboflow API 호출(좌표 획득) -> welding_calculator.py로 수치 및 점수 계산 -> gpt_advisor.py로 전문가 조언 획득 -> 프론트엔드로 최종 JSON 반환.
+
+이 지시사항을 바탕으로 불필요한 코드를 걷어내고, 완성된 FastAPI 서버의 전체 코드를 짜서 보여줘.

@@ -1,0 +1,74 @@
+import math
+import numpy as np
+
+# ==========================================
+# [모듈 1.5 업그레이드] 배관/평판 인식형 정밀 분석 로직
+# ==========================================
+def analyze_bead_quality(polygon, mm_ratio, is_pipe=False):
+    """
+    모재 형태(배관/평판)를 고려하여 비드의 폭 편차와 직진도(곡률 이탈도)를 계산합니다.
+    """
+    if not polygon or len(polygon) < 5:
+        return {"width_variation_mm": 0, "max_width_mm": 0, "min_width_mm": 0, "straightness_error_mm": 0}
+
+    # x, y 좌표들을 NumPy 배열로 변환
+    xs = np.array([p['x'] for p in polygon])
+    ys = np.array([p['y'] for p in polygon])
+    
+    # 비드가 가로 방향인지 세로 방향인지 판별 (x축 기준인지 y축 기준인지)
+    is_horizontal = (np.max(xs) - np.min(xs)) > (np.max(ys) - np.min(ys))
+    
+    indep = xs if is_horizontal else ys # 독립 변수 (기준 축)
+    dep = ys if is_horizontal else xs   # 종속 변수 (변화 축)
+
+    # 1. 직진도 및 곡률 이탈도 (Curve Deviation) 계산
+    # 평판(Plate)이면 1차 방정식(직선), 배관(Pipe)이면 2차 방정식(곡선)으로 이상적인 기준선(Trend line) 생성
+    degree = 2 if is_pipe else 1
+    
+    try:
+        # np.polyfit으로 최적의 기준선(선형 또는 곡선) 계수 도출
+        coeffs = np.polyfit(indep, dep, degree)
+        poly_func = np.poly1d(coeffs)
+        
+        # 이상적인 기준선 대비 실제 폴리곤 좌표들이 얼마나 튀어나왔는지(오차) 계산
+        fitted_dep = poly_func(indep)
+        residuals = np.abs(dep - fitted_dep)
+        max_deviation_px = np.max(residuals)
+        
+        straightness_error_mm = round(max_deviation_px * mm_ratio, 2)
+    except Exception as e:
+        print(f"Curve fitting error: {e}")
+        straightness_error_mm = 0.0
+
+    # 2. 비드 폭 일정성 계산 (기존과 동일하되 NumPy로 간결화)
+    segments = 10
+    widths = []
+    
+    min_val, max_val = np.min(indep), np.max(indep)
+    step = (max_val - min_val) / segments
+    
+    for i in range(segments):
+        s_min = min_val + i * step
+        s_max = min_val + (i + 1) * step
+        
+        # 해당 구간 안에 있는 픽셀들만 추출
+        mask = (indep >= s_min) & (indep <= s_max)
+        segment_dep = dep[mask]
+        
+        if len(segment_dep) > 0:
+            widths.append(np.max(segment_dep) - np.min(segment_dep))
+
+    if not widths:
+        return {"width_variation_mm": 0, "max_width_mm": 0, "min_width_mm": 0, "straightness_error_mm": straightness_error_mm}
+
+    max_width_mm = round(np.max(widths) * mm_ratio, 2)
+    min_width_mm = round(np.min(widths) * mm_ratio, 2)
+    width_variation_mm = round(max_width_mm - min_width_mm, 2)
+
+    return {
+        "width_variation_mm": width_variation_mm,
+        "max_width_mm": max_width_mm,
+        "min_width_mm": min_width_mm,
+        "straightness_error_mm": straightness_error_mm,
+        "is_pipe_evaluated": is_pipe # LLM에게 배관 기준 평가임을 알림
+    }
