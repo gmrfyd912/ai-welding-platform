@@ -25,7 +25,14 @@ function apiUrl(path: string) {
   return new URL(path, getApiUrl()).toString();
 }
 
-// ── 상수 ──
+function todayStr() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const WELD_TYPES = ["SMAW", "GTAW", "GMAW", "FCAW", "SAW", "EGW", "기타"];
 const MATERIALS = ["연강 평판", "연강 배관", "스테인리스 평판", "스테인리스 배관", "알루미늄", "기타"];
 const POSTURES = ["1F", "2F", "3F", "4F", "5F", "1G", "2G", "3G", "4G", "5G", "6G", "기타"];
@@ -48,17 +55,130 @@ interface ExamRecord {
   createdAt: string;
 }
 
-// ── 선택 칩 컴포넌트 ──
-function ChipGroup({
-  options,
+// ── 달력 컴포넌트 ──
+function CalendarPicker({
   value,
   onChange,
-  color = Colors.primary,
 }: {
-  options: string[];
   value: string;
-  onChange: (v: string) => void;
-  color?: string;
+  onChange: (date: string) => void;
+}) {
+  const parsed = value ? new Date(value) : new Date();
+  const [viewYear, setViewYear] = useState(parsed.getFullYear());
+  const [viewMonth, setViewMonth] = useState(parsed.getMonth());
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const selectedDate = value ? new Date(value).getDate() : null;
+  const selectedMonth = value ? new Date(value).getMonth() : null;
+  const selectedYear = value ? new Date(value).getFullYear() : null;
+
+  const isSelected = (day: number) =>
+    day === selectedDate && viewMonth === selectedMonth && viewYear === selectedYear;
+
+  const isToday = (day: number) => {
+    const t = new Date();
+    return day === t.getDate() && viewMonth === t.getMonth() && viewYear === t.getFullYear();
+  };
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
+    else setViewMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
+    else setViewMonth(m => m + 1);
+  };
+
+  const selectDay = (day: number) => {
+    const m = String(viewMonth + 1).padStart(2, "0");
+    const d = String(day).padStart(2, "0");
+    onChange(`${viewYear}-${m}-${d}`);
+    Haptics.selectionAsync();
+  };
+
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+
+  return (
+    <View style={calStyles.container}>
+      <View style={calStyles.navRow}>
+        <Pressable onPress={prevMonth} style={calStyles.navBtn} hitSlop={8}>
+          <Ionicons name="chevron-back" size={18} color="#e2e8f0" />
+        </Pressable>
+        <Text style={calStyles.monthLabel}>{viewYear}년 {viewMonth + 1}월</Text>
+        <Pressable onPress={nextMonth} style={calStyles.navBtn} hitSlop={8}>
+          <Ionicons name="chevron-forward" size={18} color="#e2e8f0" />
+        </Pressable>
+      </View>
+      <View style={calStyles.dayHeaders}>
+        {DAYS.map((d, i) => (
+          <Text key={d} style={[calStyles.dayHeader, i === 0 && { color: "#ef4444" }, i === 6 && { color: "#60a5fa" }]}>{d}</Text>
+        ))}
+      </View>
+      {rows.map((row, ri) => (
+        <View key={ri} style={calStyles.row}>
+          {Array.from({ length: 7 }).map((_, ci) => {
+            const day = row[ci] ?? null;
+            const col = ci;
+            if (!day) return <View key={ci} style={calStyles.cell} />;
+            const sel = isSelected(day);
+            const tod = isToday(day);
+            return (
+              <Pressable
+                key={ci}
+                style={[calStyles.cell, sel && calStyles.cellSelected, tod && !sel && calStyles.cellToday]}
+                onPress={() => selectDay(day)}
+              >
+                <Text style={[
+                  calStyles.dayText,
+                  col === 0 && { color: "#ef4444" },
+                  col === 6 && { color: "#60a5fa" },
+                  sel && { color: "#fff", fontFamily: "Inter_700Bold" },
+                  tod && !sel && { color: Colors.primary },
+                ]}>
+                  {day}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+      {value ? (
+        <Text style={calStyles.selected}>선택됨: {value.replace(/-/g, ".")}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+const calStyles = StyleSheet.create({
+  container: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 0.5, borderColor: "#2a3a5c",
+    borderRadius: 14, padding: 12,
+  },
+  navRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  navBtn: { padding: 4 },
+  monthLabel: { color: "#e2e8f0", fontFamily: "Inter_700Bold", fontSize: 15 },
+  dayHeaders: { flexDirection: "row", marginBottom: 4 },
+  dayHeader: { flex: 1, textAlign: "center", color: "#4a5e80", fontFamily: "Inter_600SemiBold", fontSize: 12 },
+  row: { flexDirection: "row" },
+  cell: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 6, borderRadius: 8 },
+  cellSelected: { backgroundColor: Colors.primary },
+  cellToday: { backgroundColor: Colors.primary + "22" },
+  dayText: { color: "#e2e8f0", fontFamily: "Inter_400Regular", fontSize: 13 },
+  selected: { color: Colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 12, textAlign: "center", marginTop: 8 },
+});
+
+// ── 선택 칩 ──
+function ChipGroup({ options, value, onChange, color = Colors.primary }: {
+  options: string[]; value: string; onChange: (v: string) => void; color?: string;
 }) {
   return (
     <View style={chipStyles.row}>
@@ -86,18 +206,11 @@ const chipStyles = StyleSheet.create({
 });
 
 // ── 기록 카드 ──
-function RecordCard({
-  item,
-  canDelete,
-  onDelete,
-}: {
-  item: ExamRecord;
-  canDelete: boolean;
-  onDelete: () => void;
+function RecordCard({ item, canDelete, onDelete }: {
+  item: ExamRecord; canDelete: boolean; onDelete: () => void;
 }) {
   const isPass = item.result === "합격";
   const color = isPass ? "#10b981" : "#ef4444";
-
   return (
     <View style={cardStyles.card}>
       <View style={cardStyles.top}>
@@ -108,9 +221,7 @@ function RecordCard({
               <Text style={[cardStyles.resultText, { color }]}>{item.result}</Text>
             </View>
           </View>
-          <Text style={cardStyles.sub}>
-            {item.material} · {item.posture} · {item.examDate.replace(/-/g, ".")}
-          </Text>
+          <Text style={cardStyles.sub}>{item.material} · {item.posture} · {item.examDate.replace(/-/g, ".")}</Text>
           {item.userName && (
             <Text style={cardStyles.userName}>{item.userName}{item.courseName ? ` · ${item.courseName}` : ""}</Text>
           )}
@@ -133,30 +244,16 @@ function RecordCard({
 }
 
 const cardStyles = StyleSheet.create({
-  card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 0.5, borderColor: "#2a3a5c",
-    borderRadius: 14, padding: 14, gap: 10,
-  },
+  card: { backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 0.5, borderColor: "#2a3a5c", borderRadius: 14, padding: 14, gap: 10 },
   top: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   weldType: { color: "#e2e8f0", fontFamily: "Inter_700Bold", fontSize: 15 },
-  resultBadge: {
-    borderWidth: 1, borderRadius: 8,
-    paddingHorizontal: 8, paddingVertical: 2,
-  },
+  resultBadge: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
   resultText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
   sub: { color: "#7a8aaa", fontFamily: "Inter_400Regular", fontSize: 12 },
   userName: { color: "#4a5e80", fontFamily: "Inter_400Regular", fontSize: 11 },
-  deleteBtn: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: Colors.danger + "18",
-    alignItems: "center", justifyContent: "center",
-  },
-  bottom: {
-    borderTopWidth: 0.5, borderTopColor: "#2a3a5c",
-    paddingTop: 8, gap: 3,
-  },
+  deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: Colors.danger + "18", alignItems: "center", justifyContent: "center" },
+  bottom: { borderTopWidth: 0.5, borderTopColor: "#2a3a5c", paddingTop: 8, gap: 3 },
   detail: { color: "#4a5e80", fontFamily: "Inter_400Regular", fontSize: 12 },
 });
 
@@ -172,8 +269,8 @@ export default function ExamRecordScreen() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // 폼 상태
-  const [examDate, setExamDate] = useState("");
+  // 폼 상태 - 날짜 기본값: 오늘
+  const [examDate, setExamDate] = useState(todayStr());
   const [weldType, setWeldType] = useState("");
   const [material, setMaterial] = useState("");
   const [posture, setPosture] = useState("");
@@ -182,7 +279,6 @@ export default function ExamRecordScreen() {
   const [certNumber, setCertNumber] = useState("");
   const [memo, setMemo] = useState("");
 
-  // 교사/관리자용 학생 필터
   const [selectedUserId, setSelectedUserId] = useState<string>("전체");
   const [studentList, setStudentList] = useState<Array<{ id: string; name: string; courseName?: string }>>([]);
 
@@ -194,8 +290,7 @@ export default function ExamRecordScreen() {
         : apiUrl(`/api/exam-records?userId=${user?.id}`);
       const res = await fetch(url);
       if (res.ok) setRecords(await res.json());
-    } catch {}
-    finally { setIsLoading(false); }
+    } catch {} finally { setIsLoading(false); }
   }, [isStaff, user?.id]);
 
   const loadStudents = useCallback(async () => {
@@ -209,20 +304,16 @@ export default function ExamRecordScreen() {
     } catch {}
   }, [isStaff]);
 
-  useEffect(() => {
-    loadRecords();
-    loadStudents();
-  }, [loadRecords, loadStudents]);
+  useEffect(() => { loadRecords(); loadStudents(); }, [loadRecords, loadStudents]);
 
   const resetForm = () => {
-    setExamDate(""); setWeldType(""); setMaterial("");
-    setPosture(""); setResult(""); setIssuer("");
-    setCertNumber(""); setMemo("");
+    setExamDate(todayStr()); setWeldType(""); setMaterial("");
+    setPosture(""); setResult(""); setIssuer(""); setCertNumber(""); setMemo("");
   };
 
   const handleSubmit = async () => {
-    if (!examDate || !weldType || !material || !posture || !result) {
-      Alert.alert("입력 오류", "시험일자, 용접종류, 재질, 자세, 합불 여부는 필수입니다.");
+    if (!weldType || !material || !posture || !result) {
+      Alert.alert("입력 오류", "용접종류, 재질, 자세, 합불 여부를 선택해주세요.");
       return;
     }
     setSubmitting(true);
@@ -231,9 +322,7 @@ export default function ExamRecordScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: user?.id,
-          userName: user?.name,
-          courseName: user?.courseName,
+          userId: user?.id, userName: user?.name, courseName: user?.courseName,
           examDate, weldType, material, posture, result,
           issuer: issuer || undefined,
           certNumber: certNumber || undefined,
@@ -242,49 +331,31 @@ export default function ExamRecordScreen() {
       });
       if (res.ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setShowForm(false);
-        resetForm();
-        loadRecords();
+        setShowForm(false); resetForm(); loadRecords();
       } else {
         Alert.alert("오류", "저장에 실패했습니다.");
       }
     } catch {
       Alert.alert("오류", "네트워크 오류가 발생했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   const handleDelete = (id: string, userName: string) => {
-    Alert.alert(
-      "기록 삭제",
-      `${userName}의 시험 기록을 삭제하시겠습니까?`,
-      [
-        { text: "취소", style: "cancel" },
-        {
-          text: "삭제", style: "destructive",
-          onPress: async () => {
-            try {
-              await fetch(apiUrl(`/api/exam-records/${id}`), { method: "DELETE" });
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-              loadRecords();
-            } catch {}
-          },
+    Alert.alert("기록 삭제", `${userName}의 시험 기록을 삭제하시겠습니까?`, [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제", style: "destructive",
+        onPress: async () => {
+          try {
+            await fetch(apiUrl(`/api/exam-records/${id}`), { method: "DELETE" });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            loadRecords();
+          } catch {}
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  // 날짜 입력 핸들러
-  const handleDateChange = (text: string) => {
-    const nums = text.replace(/\D/g, "").slice(0, 8);
-    let formatted = nums;
-    if (nums.length > 4) formatted = nums.slice(0, 4) + "-" + nums.slice(4);
-    if (nums.length > 6) formatted = nums.slice(0, 4) + "-" + nums.slice(4, 6) + "-" + nums.slice(6);
-    setExamDate(formatted);
-  };
-
-  // 필터링된 기록
   const filteredRecords = isStaff && selectedUserId !== "전체"
     ? records.filter((r) => r.userId === selectedUserId)
     : records;
@@ -296,22 +367,16 @@ export default function ExamRecordScreen() {
     <View style={[styles.container, { paddingTop: topPad + 8 }]}>
       <LinearGradient colors={["#0D1528", "#0A0E1A", "#080C18"]} style={StyleSheet.absoluteFill} />
 
-      {/* 헤더 */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color="#e2e8f0" />
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>평가 · 자격 기록</Text>
-          <Text style={styles.headerSub}>
-            전체 {filteredRecords.length}건 · 합격 {passCount} · 불합격 {failCount}
-          </Text>
+          <Text style={styles.headerSub}>전체 {filteredRecords.length}건 · 합격 {passCount} · 불합격 {failCount}</Text>
         </View>
         {!isStaff && (
-          <Pressable
-            style={styles.addBtn}
-            onPress={() => { setShowForm(true); Haptics.selectionAsync(); }}
-          >
+          <Pressable style={styles.addBtn} onPress={() => { setShowForm(true); Haptics.selectionAsync(); }}>
             <LinearGradient colors={[Colors.primary, Colors.primaryDark]} style={styles.addBtnGrad}>
               <Ionicons name="add" size={22} color="#fff" />
             </LinearGradient>
@@ -319,14 +384,9 @@ export default function ExamRecordScreen() {
         )}
       </View>
 
-      {/* 교사/관리자: 학생 필터 */}
       {isStaff && studentList.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-          contentContainerStyle={styles.filterContent}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll} contentContainerStyle={styles.filterContent}>
           <Pressable
             style={[styles.filterChip, selectedUserId === "전체" && styles.filterChipActive]}
             onPress={() => setSelectedUserId("전체")}
@@ -334,33 +394,24 @@ export default function ExamRecordScreen() {
             <Text style={[styles.filterChipText, selectedUserId === "전체" && styles.filterChipTextActive]}>전체</Text>
           </Pressable>
           {studentList.map((s) => (
-            <Pressable
-              key={s.id}
+            <Pressable key={s.id}
               style={[styles.filterChip, selectedUserId === s.id && styles.filterChipActive]}
               onPress={() => setSelectedUserId(s.id)}
             >
-              <Text style={[styles.filterChipText, selectedUserId === s.id && styles.filterChipTextActive]}>
-                {s.name}
-              </Text>
+              <Text style={[styles.filterChipText, selectedUserId === s.id && styles.filterChipTextActive]}>{s.name}</Text>
             </Pressable>
           ))}
         </ScrollView>
       )}
 
-      {/* 기록 목록 */}
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.primary} />
-        </View>
+        <View style={styles.center}><ActivityIndicator color={Colors.primary} /></View>
       ) : filteredRecords.length === 0 ? (
         <View style={styles.center}>
           <MaterialCommunityIcons name="certificate-outline" size={48} color="#2a3a5c" />
           <Text style={styles.emptyText}>등록된 시험 기록이 없어요</Text>
           {!isStaff && (
-            <Pressable
-              style={styles.emptyBtn}
-              onPress={() => setShowForm(true)}
-            >
+            <Pressable style={styles.emptyBtn} onPress={() => setShowForm(true)}>
               <Text style={styles.emptyBtnText}>첫 기록 추가하기</Text>
             </Pressable>
           )}
@@ -381,13 +432,8 @@ export default function ExamRecordScreen() {
         />
       )}
 
-      {/* 기록 입력 모달 */}
-      <Modal
-        visible={showForm}
-        animationType="slide"
-        transparent
-        onRequestClose={() => { setShowForm(false); resetForm(); }}
-      >
+      <Modal visible={showForm} animationType="slide" transparent
+        onRequestClose={() => { setShowForm(false); resetForm(); }}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
@@ -400,21 +446,12 @@ export default function ExamRecordScreen() {
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
 
-              {/* 시험일자 */}
+              {/* 시험일자 - 달력 */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>시험일자 <Text style={{ color: Colors.danger }}>*</Text></Text>
-                <View style={styles.inputRow}>
-                  <Ionicons name="calendar-outline" size={18} color="#4a5e80" style={{ marginRight: 8 }} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor="#4a5e80"
-                    value={examDate}
-                    onChangeText={handleDateChange}
-                    keyboardType="numeric"
-                    maxLength={10}
-                  />
-                </View>
+                <Text style={styles.formLabel}>
+                  <Ionicons name="calendar-outline" size={14} color="#7a8aaa" /> 시험일자
+                </Text>
+                <CalendarPicker value={examDate} onChange={setExamDate} />
               </View>
 
               {/* 용접 종류 */}
@@ -444,15 +481,13 @@ export default function ExamRecordScreen() {
                     const color = isPass ? "#10b981" : "#ef4444";
                     const isSelected = result === r;
                     return (
-                      <Pressable
-                        key={r}
+                      <Pressable key={r}
                         style={[styles.resultChip, isSelected && { backgroundColor: color + "22", borderColor: color }]}
                         onPress={() => { setResult(r); Haptics.selectionAsync(); }}
                       >
                         <Ionicons
                           name={isPass ? "checkmark-circle-outline" : "close-circle-outline"}
-                          size={18}
-                          color={isSelected ? color : "#4a5e80"}
+                          size={18} color={isSelected ? color : "#4a5e80"}
                         />
                         <Text style={[styles.resultChipText, isSelected && { color }]}>{r}</Text>
                       </Pressable>
@@ -467,7 +502,7 @@ export default function ExamRecordScreen() {
                 <ChipGroup options={ISSUERS} value={issuer} onChange={setIssuer} color="#60a5fa" />
               </View>
 
-              {/* 자격증 번호 (합격 시) */}
+              {/* 자격증 번호 */}
               {result === "합격" && (
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>자격증 번호</Text>
@@ -499,7 +534,6 @@ export default function ExamRecordScreen() {
                 />
               </View>
 
-              {/* 저장 버튼 */}
               <Pressable
                 style={[styles.submitBtn, submitting && { opacity: 0.6 }]}
                 onPress={handleSubmit}
@@ -512,8 +546,7 @@ export default function ExamRecordScreen() {
                 >
                   {submitting
                     ? <ActivityIndicator color="#fff" />
-                    : <Text style={styles.submitBtnText}>저장하기</Text>
-                  }
+                    : <Text style={styles.submitBtnText}>저장하기</Text>}
                 </LinearGradient>
               </Pressable>
 
@@ -527,81 +560,37 @@ export default function ExamRecordScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0A0E1A" },
-
-  header: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingBottom: 12, gap: 10,
-  },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
   backBtn: { padding: 4 },
   headerTitle: { color: "#e2e8f0", fontFamily: "Inter_700Bold", fontSize: 20 },
   headerSub: { color: "#4a5e80", fontFamily: "Inter_400Regular", fontSize: 12, marginTop: 2 },
   addBtn: { borderRadius: 18, overflow: "hidden" },
   addBtnGrad: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-
   filterScroll: { maxHeight: 44, marginBottom: 8 },
   filterContent: { paddingHorizontal: 16, gap: 8, alignItems: "center" },
-  filterChip: {
-    paddingHorizontal: 14, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 0.5, borderColor: "#2a3a5c",
-    backgroundColor: "rgba(255,255,255,0.04)",
-  },
+  filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 0.5, borderColor: "#2a3a5c", backgroundColor: "rgba(255,255,255,0.04)" },
   filterChipActive: { backgroundColor: Colors.primary + "22", borderColor: Colors.primary },
   filterChipText: { color: "#7a8aaa", fontFamily: "Inter_500Medium", fontSize: 12 },
   filterChipTextActive: { color: Colors.primary },
-
   list: { paddingHorizontal: 16, paddingBottom: 40, gap: 10, paddingTop: 8 },
-
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   emptyText: { color: "#4a5e80", fontFamily: "Inter_400Regular", fontSize: 14 },
-  emptyBtn: {
-    marginTop: 8, paddingHorizontal: 20, paddingVertical: 10,
-    borderRadius: 10, borderWidth: 1, borderColor: Colors.primary,
-  },
+  emptyBtn: { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: Colors.primary },
   emptyBtnText: { color: Colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 14 },
-
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
-  modalSheet: {
-    backgroundColor: "#0D1528",
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    borderTopWidth: 1, borderColor: "#2a3a5c",
-    maxHeight: "92%",
-  },
-  modalHandle: {
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: "#2a3a5c", alignSelf: "center", marginTop: 12, marginBottom: 4,
-  },
-  modalHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingVertical: 12,
-    borderBottomWidth: 0.5, borderBottomColor: "#2a3a5c",
-  },
+  modalSheet: { backgroundColor: "#0D1528", borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: "#2a3a5c", maxHeight: "92%" },
+  modalHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: "#2a3a5c", alignSelf: "center", marginTop: 12, marginBottom: 4 },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: "#2a3a5c" },
   modalTitle: { color: "#e2e8f0", fontFamily: "Inter_700Bold", fontSize: 18 },
-
   formContent: { padding: 20, gap: 20, paddingBottom: 40 },
   formGroup: { gap: 10 },
   formLabel: { color: "#7a8aaa", fontFamily: "Inter_600SemiBold", fontSize: 13 },
-
-  inputRow: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 0.5, borderColor: "#2a3a5c",
-    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
-  },
+  inputRow: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 0.5, borderColor: "#2a3a5c", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
   input: { flex: 1, color: "#e2e8f0", fontFamily: "Inter_400Regular", fontSize: 14 },
-  memoInput: {
-    minHeight: 80, alignItems: "flex-start",
-    color: "#e2e8f0", fontFamily: "Inter_400Regular", fontSize: 14,
-  },
-
+  memoInput: { minHeight: 80, alignItems: "flex-start", color: "#e2e8f0", fontFamily: "Inter_400Regular", fontSize: 14 },
   resultRow: { flexDirection: "row", gap: 12 },
-  resultChip: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, paddingVertical: 12, borderRadius: 12,
-    borderWidth: 1, borderColor: "#2a3a5c",
-    backgroundColor: "rgba(255,255,255,0.04)",
-  },
+  resultChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#2a3a5c", backgroundColor: "rgba(255,255,255,0.04)" },
   resultChipText: { color: "#7a8aaa", fontFamily: "Inter_600SemiBold", fontSize: 14 },
-
   submitBtn: { borderRadius: 12, overflow: "hidden", marginTop: 8 },
   submitBtnGrad: { height: 52, alignItems: "center", justifyContent: "center" },
   submitBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16 },
