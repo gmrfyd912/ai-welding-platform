@@ -20,6 +20,19 @@ export interface User {
   courseName?: string;
   profilePhotoUri?: string;
   permissions?: UserPermission[];
+  enrollDate?: string;   // "YYYY-MM-DD"
+  graduateDate?: string; // "YYYY-MM-DD"
+}
+
+interface RegisterData {
+  username: string;
+  password: string;
+  name: string;
+  role: UserRole;
+  courseName?: string;
+  profilePhotoUri?: string;
+  enrollDate?: string;
+  graduateDate?: string;
 }
 
 interface AuthContextValue {
@@ -27,7 +40,7 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
-  register: (data: { username: string; password: string; name: string; role: UserRole; courseName?: string; profilePhotoUri?: string }) => Promise<{ success: boolean; error?: string }>;
+  register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (updates: Partial<User & { password?: string }>) => Promise<void>;
 }
 
@@ -103,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.removeItem(SESSION_KEY);
   };
 
-  const register = async (data: { username: string; password: string; name: string; role: UserRole; courseName?: string; profilePhotoUri?: string }): Promise<{ success: boolean; error?: string }> => {
+  const register = async (data: RegisterData): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await fetch(apiUrl("/api/auth/register"), {
         method: "POST",

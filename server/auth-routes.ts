@@ -18,6 +18,29 @@ async function ensureVisitorTable() {
 }
 ensureVisitorTable().catch(console.error);
 
+// 입교일/수료일 컬럼 자동 추가
+async function ensureDateColumns() {
+  await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS enroll_date DATE`);
+  await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS graduate_date DATE`);
+}
+ensureDateColumns().catch(console.error);
+
+function rowToUser(u: any) {
+  let perms: string[] = [];
+  try { perms = JSON.parse(u.permissions || "[]"); } catch {}
+  return {
+    id: u.id,
+    username: u.username,
+    name: u.name,
+    role: u.role,
+    courseName: u.course_name ?? undefined,
+    profilePhotoUri: u.profile_photo_uri ?? undefined,
+    permissions: perms,
+    enrollDate: u.enroll_date ? u.enroll_date.toISOString().slice(0, 10) : undefined,
+    graduateDate: u.graduate_date ? u.graduate_date.toISOString().slice(0, 10) : undefined,
+  };
+}
+
 function rowToAdminUser(u: any) {
   let perms: string[] = [];
   try { perms = JSON.parse(u.permissions || "[]"); } catch {}
@@ -30,6 +53,8 @@ function rowToAdminUser(u: any) {
     courseName: u.course_name ?? undefined,
     profilePhotoUri: u.profile_photo_uri ?? undefined,
     permissions: perms,
+    enrollDate: u.enroll_date ? u.enroll_date.toISOString().slice(0, 10) : undefined,
+    graduateDate: u.graduate_date ? u.graduate_date.toISOString().slice(0, 10) : undefined,
   };
 }
 
@@ -47,18 +72,7 @@ export function registerAuthRoutes(app: Express): void {
         [username, password]
       );
       if (result.rows.length === 0) return res.status(401).json({ error: "아이디 또는 패스워드가 올바르지 않습니다." });
-      const user = result.rows[0];
-      let perms: string[] = [];
-      try { perms = JSON.parse(user.permissions || "[]"); } catch {}
-      res.json({
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        role: user.role,
-        courseName: user.course_name ?? undefined,
-        profilePhotoUri: user.profile_photo_uri ?? undefined,
-        permissions: perms,
-      });
+      res.json(rowToUser(result.rows[0]));
     } catch (err) {
       console.error("login error:", err);
       res.status(500).json({ error: "서버 오류" });
@@ -66,17 +80,27 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
-    const { username, password, name, role, courseName, profilePhotoUri } = req.body;
+    const { username, password, name, role, courseName, profilePhotoUri, enrollDate, graduateDate } = req.body;
     if (!username || !password || !name) return res.status(400).json({ error: "필수 항목을 입력해주세요." });
     try {
       const dupName = await pool.query("SELECT id FROM weld_users WHERE name = $1", [name]);
       if (dupName.rows.length > 0) return res.status(409).json({ error: "이미 사용 중인 이름입니다. 다른 이름을 사용해주세요." });
       const id = Date.now().toString() + Math.random().toString(36).substr(2, 6);
       await pool.query(
-        "INSERT INTO weld_users (id, username, password, name, role, course_name, profile_photo_uri) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        [id, username, password, name, role || "trainee", courseName || null, profilePhotoUri || null]
+        `INSERT INTO weld_users 
+         (id, username, password, name, role, course_name, profile_photo_uri, enroll_date, graduate_date) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          id, username, password, name,
+          role || "교육생",
+          courseName || null,
+          profilePhotoUri || null,
+          enrollDate || null,
+          graduateDate || null,
+        ]
       );
-      res.json({ id, username, name, role: role || "trainee", courseName: courseName || undefined, profilePhotoUri: profilePhotoUri || undefined });
+      const result = await pool.query("SELECT * FROM weld_users WHERE id = $1", [id]);
+      res.json(rowToUser(result.rows[0]));
     } catch (err: any) {
       if (err.code === "23505") return res.status(409).json({ error: "이미 사용 중인 아이디입니다." });
       console.error("register error:", err);
@@ -101,14 +125,7 @@ export function registerAuthRoutes(app: Express): void {
         values
       );
       if (result.rows.length === 0) return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
-      const user = result.rows[0];
-      res.json({
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        role: user.role,
-        profilePhotoUri: user.profile_photo_uri ?? undefined,
-      });
+      res.json(rowToUser(result.rows[0]));
     } catch (err) {
       console.error("profile update error:", err);
       res.status(500).json({ error: "서버 오류" });
@@ -119,20 +136,49 @@ export function registerAuthRoutes(app: Express): void {
     try {
       const result = await pool.query("SELECT * FROM weld_users WHERE id = $1", [req.params.id]);
       if (result.rows.length === 0) return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
-      const user = result.rows[0];
-      let perms: string[] = [];
-      try { perms = JSON.parse(user.permissions || "[]"); } catch {}
-      res.json({
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        role: user.role,
-        courseName: user.course_name ?? undefined,
-        profilePhotoUri: user.profile_photo_uri ?? undefined,
-        permissions: perms,
-      });
+      res.json(rowToUser(result.rows[0]));
     } catch (err) {
       console.error("get user error:", err);
+      res.status(500).json({ error: "서버 오류" });
+    }
+  });
+
+  // 같은 과정명의 교육생 목록 조회 (교사/관리자용)
+  app.get("/api/auth/students", async (req: Request, res: Response) => {
+    try {
+      const { courseName } = req.query;
+      let query = `SELECT * FROM weld_users WHERE role = '교육생' ORDER BY name ASC`;
+      const params: any[] = [];
+      if (courseName) {
+        query = `SELECT * FROM weld_users WHERE role = '교육생' AND course_name = $1 ORDER BY name ASC`;
+        params.push(courseName);
+      }
+      const result = await pool.query(query, params);
+      res.json(result.rows.map(rowToUser));
+    } catch (err) {
+      console.error("get students error:", err);
+      res.status(500).json({ error: "서버 오류" });
+    }
+  });
+
+  // 과정별 진도 현황 (교사/관리자용)
+  app.get("/api/auth/courses/progress", async (_req: Request, res: Response) => {
+    try {
+      const result = await pool.query(`
+        SELECT course_name, enroll_date, graduate_date, COUNT(*) as student_count
+        FROM weld_users
+        WHERE role = '교육생' AND course_name IS NOT NULL
+        GROUP BY course_name, enroll_date, graduate_date
+        ORDER BY enroll_date ASC
+      `);
+      res.json(result.rows.map((r: any) => ({
+        courseName: r.course_name,
+        enrollDate: r.enroll_date ? r.enroll_date.toISOString().slice(0, 10) : null,
+        graduateDate: r.graduate_date ? r.graduate_date.toISOString().slice(0, 10) : null,
+        studentCount: parseInt(r.student_count),
+      })));
+    } catch (err) {
+      console.error("courses progress error:", err);
       res.status(500).json({ error: "서버 오류" });
     }
   });
@@ -140,7 +186,7 @@ export function registerAuthRoutes(app: Express): void {
   app.get("/api/admin/users", async (_req: Request, res: Response) => {
     try {
       const result = await pool.query(
-        `SELECT id, username, password, name, role, course_name, profile_photo_uri, permissions
+        `SELECT id, username, password, name, role, course_name, profile_photo_uri, permissions, enroll_date, graduate_date
          FROM weld_users
          ORDER BY CASE role WHEN '관리자' THEN 0 WHEN '교사' THEN 1 ELSE 2 END, name ASC`
       );
@@ -153,7 +199,7 @@ export function registerAuthRoutes(app: Express): void {
 
   app.put("/api/admin/users/:id", async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { role, password, courseName, permissions, profilePhotoUri } = req.body;
+    const { role, password, courseName, permissions, profilePhotoUri, enrollDate, graduateDate } = req.body;
     try {
       const fields: string[] = [];
       const values: any[] = [];
@@ -163,6 +209,8 @@ export function registerAuthRoutes(app: Express): void {
       if (courseName !== undefined) { fields.push(`course_name = $${idx++}`); values.push(courseName || null); }
       if (permissions !== undefined) { fields.push(`permissions = $${idx++}`); values.push(JSON.stringify(permissions)); }
       if (profilePhotoUri !== undefined) { fields.push(`profile_photo_uri = $${idx++}`); values.push(profilePhotoUri || null); }
+      if (enrollDate !== undefined) { fields.push(`enroll_date = $${idx++}`); values.push(enrollDate || null); }
+      if (graduateDate !== undefined) { fields.push(`graduate_date = $${idx++}`); values.push(graduateDate || null); }
       if (fields.length === 0) return res.status(400).json({ error: "변경할 내용이 없습니다." });
       values.push(id);
       const result = await pool.query(
@@ -213,4 +261,8 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
+  // AI 시스템 상태 체크
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 }
