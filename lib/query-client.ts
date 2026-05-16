@@ -9,16 +9,14 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
  */
 export function getApiUrl(): string {
   let host = process.env.EXPO_PUBLIC_DOMAIN;
-
   if (!host) {
     throw new Error("EXPO_PUBLIC_DOMAIN is not set");
   }
-
-  // Strip any explicit port number — Replit proxies port 443 → app port.
-  // e.g. "abc.replit.dev:5000" → "abc.replit.dev"
-  const hostOnly = host.replace(/:\d+$/, "");
-
-  return `https://${hostOnly}/`;
+  // 이미 http:// 또는 https://가 포함된 경우 그대로 사용
+  if (host.startsWith("http://") || host.startsWith("https://")) {
+    return host.endsWith("/") ? host : `${host}/`;
+  }
+  return `http://${host}/`;
 }
 
 export function apiUrl(path: string): string {
