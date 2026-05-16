@@ -16,9 +16,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { useWelding } from "@/context/WeldingContext";
 import { getApiUrl } from "@/lib/query-client";
 
-// 진도% 계산 함수
 function calcProgress(enrollDate?: string, graduateDate?: string): number {
   if (!enrollDate || !graduateDate) return 0;
   const today = new Date();
@@ -30,13 +30,11 @@ function calcProgress(enrollDate?: string, graduateDate?: string): number {
   return Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)));
 }
 
-// 날짜 포맷
 function fmtDate(d?: string) {
   if (!d) return "-";
   return d.replace(/-/g, ".");
 }
 
-// D-Day 계산
 function calcDday(graduateDate?: string): string {
   if (!graduateDate) return "";
   const today = new Date();
@@ -60,6 +58,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
   const { t } = useLanguage();
+  const { getUserResults } = useWelding();
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [courseList, setCourseList] = useState<CourseProgress[]>([]);
 
@@ -69,7 +68,6 @@ export default function HomeScreen() {
   const isTrainee = user?.role === "교육생";
   const isStaff = user?.role === "교사" || user?.role === "관리자";
 
-  // AI 시스템 상태 체크
   const checkHealth = useCallback(async () => {
     try {
       const url = new URL("/api/health", getApiUrl()).toString();
@@ -80,7 +78,6 @@ export default function HomeScreen() {
     }
   }, []);
 
-  // 교사/관리자: 과정별 진도 목록 로드
   const loadCourses = useCallback(async () => {
     if (!isStaff) return;
     try {
@@ -99,18 +96,32 @@ export default function HomeScreen() {
 
   const progress = isTrainee ? calcProgress(user?.enrollDate, user?.graduateDate) : 0;
   const dday = isTrainee ? calcDday(user?.graduateDate) : "";
+  const myResults = user ? getUserResults(user.id) : [];
 
-  const goTheory = () => { Haptics.selectionAsync(); router.push("/theory"); };
-  const goSkill = () => { Haptics.selectionAsync(); router.push("/(tabs)"); };
-  const goCoaching = () => { Haptics.selectionAsync(); router.push("/coaching-live"); };
-  const goDiagnosis = () => { Haptics.selectionAsync(); router.push("/diagnosis"); };
+  const handleDiagnosis = () => {
+    Haptics.selectionAsync();
+    if (isTrainee) {
+      if (myResults.length === 0) {
+        router.push("/(tabs)");
+      } else {
+        const latest = [...myResults].sort((a, b) => b.timestamp - a.timestamp)[0];
+        router.push({ pathname: "/diagnosis/[id]", params: { id: latest.id } });
+      }
+    } else {
+      router.push("/(tabs)");
+    }
+  };
+
+  const handleProgress = () => {
+    Haptics.selectionAsync();
+    if (isStaff) {
+      router.push("/(tabs)/members");
+    }
+  };
 
   return (
     <View style={[styles.container, { paddingTop: topPad + 8 }]}>
       <LinearGradient colors={["#0D1528", "#0A0E1A", "#080C18"]} style={StyleSheet.absoluteFill} />
-
-      {/* 배경 그리드 */}
-      <View style={styles.gridBg} pointerEvents="none" />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottomPad + 24 }]}
@@ -146,24 +157,34 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* AI 시스템 상태바 */}
+        {/* AI 상태바 */}
         <Pressable style={styles.statusBar} onPress={checkHealth}>
-          <View style={[styles.statusDot, { backgroundColor: isOnline === null ? "#f59e0b" : isOnline ? "#10b981" : "#ef4444" }]} />
+          <View style={[styles.statusDot, {
+            backgroundColor: isOnline === null ? "#f59e0b" : isOnline ? "#10b981" : "#ef4444"
+          }]} />
           <Text style={styles.statusText}>
-            {isOnline === null ? "AI 시스템 연결 확인 중..." : isOnline ? "AI 분석 시스템 정상 작동 중" : "AI 시스템 오프라인 · 탭하여 재연결"}
+            {isOnline === null
+              ? "AI 시스템 연결 확인 중..."
+              : isOnline
+              ? "AI 분석 시스템 정상 작동 중"
+              : "AI 시스템 오프라인 · 탭하여 재연결"}
           </Text>
-          <View style={[styles.statusBadge, { borderColor: isOnline === null ? "#f59e0b" : isOnline ? "#10b981" : "#ef4444" }]}>
-            <Text style={[styles.statusBadgeText, { color: isOnline === null ? "#f59e0b" : isOnline ? "#10b981" : "#ef4444" }]}>
+          <View style={[styles.statusBadge, {
+            borderColor: isOnline === null ? "#f59e0b" : isOnline ? "#10b981" : "#ef4444"
+          }]}>
+            <Text style={[styles.statusBadgeText, {
+              color: isOnline === null ? "#f59e0b" : isOnline ? "#10b981" : "#ef4444"
+            }]}>
               {isOnline === null ? "..." : isOnline ? "ONLINE" : "OFFLINE"}
             </Text>
           </View>
         </Pressable>
 
-        {/* 섹션: 학습 메뉴 */}
+        {/* 학습 메뉴 */}
         <Text style={styles.sectionTitle}>학습 메뉴</Text>
         <View style={styles.mainCards}>
           <Pressable
-            onPress={goTheory}
+            onPress={() => { Haptics.selectionAsync(); router.push("/theory"); }}
             style={({ pressed }) => [styles.mainCard, pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] }]}
           >
             <LinearGradient colors={["#1A4D8C", "#0E2D54"]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
@@ -183,7 +204,7 @@ export default function HomeScreen() {
           </Pressable>
 
           <Pressable
-            onPress={goSkill}
+            onPress={() => { Haptics.selectionAsync(); router.push("/(tabs)"); }}
             style={({ pressed }) => [styles.mainCard, pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] }]}
           >
             <LinearGradient colors={["#b94a10", "#7c2a00"]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
@@ -203,21 +224,22 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* 섹션: 빠른 메뉴 */}
+        {/* 빠른 메뉴 */}
         <Text style={styles.sectionTitle}>빠른 메뉴</Text>
         <View style={styles.quickGrid}>
 
-          {/* 1. 진도 현황 */}
-          <Pressable style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.8 }]}>
+          {/* 진도 현황 */}
+          <Pressable
+            style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.8 }]}
+            onPress={handleProgress}
+          >
             <View style={[styles.quickIcon, { backgroundColor: "rgba(37,99,235,0.15)" }]}>
               <Ionicons name="bar-chart-outline" size={20} color="#60a5fa" />
             </View>
             <Text style={styles.quickLabel}>진도 현황</Text>
             {isTrainee ? (
               <>
-                <Text style={styles.quickSub}>
-                  {user?.courseName ?? "과정"} · {dday}
-                </Text>
+                <Text style={styles.quickSub}>{user?.courseName ?? "과정"} · {dday}</Text>
                 <View style={styles.progressBg}>
                   <View style={[styles.progressFill, { width: `${progress}%` as any, backgroundColor: "#2563eb" }]} />
                 </View>
@@ -244,21 +266,26 @@ export default function HomeScreen() {
                     );
                   })
                 )}
+                <View style={styles.quickArrow}>
+                  <Ionicons name="chevron-forward" size={14} color="#4a5e80" />
+                </View>
               </>
             )}
           </Pressable>
 
-          {/* 2. AI 진단 */}
+          {/* AI 진단 */}
           <Pressable
             style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.8 }]}
-            onPress={() => { Haptics.selectionAsync(); goDiagnosis(); }}
+            onPress={handleDiagnosis}
           >
             <View style={[styles.quickIcon, { backgroundColor: "rgba(16,185,129,0.15)" }]}>
               <Ionicons name="analytics-outline" size={20} color="#10b981" />
             </View>
             <Text style={styles.quickLabel}>AI 진단</Text>
             {isTrainee ? (
-              <Text style={styles.quickSub}>내 용접 AI 분석 리포트</Text>
+              <Text style={styles.quickSub}>
+                {myResults.length > 0 ? `누적 ${myResults.length}건 분석` : "첫 분석을 시작하세요"}
+              </Text>
             ) : (
               <Text style={styles.quickSub}>교육생 선택 → 리포트</Text>
             )}
@@ -267,10 +294,10 @@ export default function HomeScreen() {
             </View>
           </Pressable>
 
-          {/* 3. 실시간 코칭 */}
+          {/* 실시간 코칭 */}
           <Pressable
             style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.8 }]}
-            onPress={() => { Haptics.selectionAsync(); goCoaching(); }}
+            onPress={() => { Haptics.selectionAsync(); router.push("/coaching-live"); }}
           >
             <View style={[styles.quickIcon, { backgroundColor: "rgba(249,115,22,0.15)" }]}>
               <Ionicons name="videocam-outline" size={20} color="#f97316" />
@@ -282,10 +309,10 @@ export default function HomeScreen() {
             </View>
           </Pressable>
 
-          {/* 4. 평가·자격 */}
+          {/* 평가·자격 */}
           <Pressable
             style={({ pressed }) => [styles.quickCard, pressed && { opacity: 0.8 }]}
-            onPress={() => { Haptics.selectionAsync(); router.push("/diagnosis"); }}
+            onPress={() => { Haptics.selectionAsync(); router.push("/exam-record"); }}
           >
             <View style={[styles.quickIcon, { backgroundColor: "rgba(139,92,246,0.15)" }]}>
               <Ionicons name="ribbon-outline" size={20} color="#8b5cf6" />
@@ -331,21 +358,13 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0A0E1A" },
-  gridBg: {
-    position: "absolute", inset: 0,
-    opacity: 0.03,
-    backgroundImage: undefined,
-  } as any,
   scroll: { paddingHorizontal: 20, gap: 0 },
-
-  // 헤더
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
   avatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: Colors.primary },
   avatarPlaceholder: {
     width: 42, height: 42, borderRadius: 21,
-    backgroundColor: Colors.primary + "33",
-    borderWidth: 2, borderColor: Colors.primary,
+    backgroundColor: Colors.primary + "33", borderWidth: 2, borderColor: Colors.primary,
     alignItems: "center", justifyContent: "center",
   },
   avatarText: { color: Colors.primary, fontFamily: "Inter_700Bold", fontSize: 16 },
@@ -354,91 +373,48 @@ const styles = StyleSheet.create({
   roleTag: { color: "#4a5e80", fontFamily: "Inter_400Regular", fontSize: 12 },
   logoutBtn: {
     width: 38, height: 38, borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 0.5, borderColor: "#2a3a5c",
+    backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 0.5, borderColor: "#2a3a5c",
     alignItems: "center", justifyContent: "center",
   },
-
-  // 상태바
   statusBar: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: "rgba(37,99,235,0.08)",
-    borderWidth: 0.5, borderColor: "#2563eb",
+    backgroundColor: "rgba(37,99,235,0.08)", borderWidth: 0.5, borderColor: "#2563eb",
     borderRadius: 12, padding: 10, marginBottom: 18,
   },
   statusDot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
   statusText: { color: "#60a5fa", fontFamily: "Inter_400Regular", fontSize: 11, flex: 1 },
-  statusBadge: {
-    borderWidth: 0.5, borderRadius: 10,
-    paddingHorizontal: 8, paddingVertical: 2,
-  },
+  statusBadge: { borderWidth: 0.5, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   statusBadgeText: { fontFamily: "Inter_600SemiBold", fontSize: 9, letterSpacing: 1 },
-
-  // 섹션 타이틀
   sectionTitle: {
-    color: "#4a5e80", fontFamily: "Inter_600SemiBold",
-    fontSize: 10, letterSpacing: 2,
-    textTransform: "uppercase", marginBottom: 10,
+    color: "#4a5e80", fontFamily: "Inter_600SemiBold", fontSize: 10,
+    letterSpacing: 2, textTransform: "uppercase", marginBottom: 10,
   },
-
-  // 메인 카드
   mainCards: { flexDirection: "row", gap: 10, marginBottom: 18 },
-  mainCard: {
-    flex: 1, borderRadius: 18, padding: 16,
-    overflow: "hidden", minHeight: 140,
-    justifyContent: "space-between",
-  },
-  cardTopLine: {
-    position: "absolute", top: 0, left: 0, right: 0, height: 2,
-    backgroundColor: "rgba(255,255,255,0.25)",
-  },
+  mainCard: { flex: 1, borderRadius: 18, padding: 16, overflow: "hidden", minHeight: 140, justifyContent: "space-between" },
+  cardTopLine: { position: "absolute", top: 0, left: 0, right: 0, height: 2, backgroundColor: "rgba(255,255,255,0.25)" },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  cardIconWrap: {
-    width: 50, height: 50, borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center", justifyContent: "center",
-  },
-  cardArrow: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    alignItems: "center", justifyContent: "center",
-  },
+  cardIconWrap: { width: 50, height: 50, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
+  cardArrow: { width: 28, height: 28, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
   cardTitle: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 18, marginTop: 10 },
   cardDesc: { color: "rgba(255,255,255,0.65)", fontFamily: "Inter_400Regular", fontSize: 10, marginTop: 2 },
-
-  // 빠른 메뉴
-  quickGrid: {
-    flexDirection: "row", flexWrap: "wrap",
-    gap: 10, marginBottom: 18,
-  },
+  quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 18 },
   quickCard: {
-    width: "47.5%",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 0.5, borderColor: "#2a3a5c",
-    borderRadius: 14, padding: 14,
-    gap: 6,
+    width: "47.5%", backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 0.5, borderColor: "#2a3a5c", borderRadius: 14, padding: 14, gap: 6,
   },
-  quickIcon: {
-    width: 38, height: 38, borderRadius: 10,
-    alignItems: "center", justifyContent: "center",
-  },
+  quickIcon: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   quickLabel: { color: "#e2e8f0", fontFamily: "Inter_600SemiBold", fontSize: 13 },
   quickSub: { color: "#4a5e80", fontFamily: "Inter_400Regular", fontSize: 10 },
   quickArrow: { alignSelf: "flex-end", marginTop: 4 },
-
-  // 진도바
   progressBg: { height: 3, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 2, marginTop: 2 },
   progressFill: { height: 3, borderRadius: 2 },
   progressPct: { color: "#60a5fa", fontFamily: "Inter_600SemiBold", fontSize: 11 },
   courseRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   courseName: { color: "#7a8aaa", fontFamily: "Inter_400Regular", fontSize: 10 },
   coursePct: { color: "#60a5fa", fontFamily: "Inter_600SemiBold", fontSize: 10 },
-
-  // 과정 정보 카드 (교육생 전용)
   courseInfoCard: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 0.5, borderColor: "#2a3a5c",
-    borderRadius: 14, padding: 14, gap: 12,
+    backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 0.5,
+    borderColor: "#2a3a5c", borderRadius: 14, padding: 14, gap: 12,
   },
   courseInfoHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
   courseInfoTitle: { color: "#e2e8f0", fontFamily: "Inter_600SemiBold", fontSize: 13 },
