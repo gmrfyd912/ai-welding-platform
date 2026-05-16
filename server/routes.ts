@@ -6,6 +6,7 @@ import { registerResultsRoutes } from "./results-routes";
 import { registerTheoryRoutes } from "./theory-routes";
 import { registerOxRoutes } from "./ox-routes";
 import { registerCoachingRoutes } from "./coaching-routes";
+import { registerExamRoutes } from "./exam-routes";
 
 export async function registerRoutes(app: Express) {
   registerAuthRoutes(app);
@@ -14,5 +15,6 @@ export async function registerRoutes(app: Express) {
   registerOxRoutes(app);
   registerCoachingRoutes(app);
   registerWeldAnalysisRoute(app);
+  registerExamRoutes(app);
   return createServer(app);
 }
