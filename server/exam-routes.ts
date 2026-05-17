@@ -67,10 +67,19 @@ export function registerExamRoutes(app: Express): void {
   // 등록
   app.post("/api/exam-records", async (req: Request, res: Response) => {
     const { userId, userName, courseName, examDate, weldType, material, posture, result, issuer, certNumber, memo } = req.body;
-    if (!userId || !userName || !examDate || !weldType || !material || !posture || !result) {
-      return res.status(400).json({ error: "필수 항목을 입력해주세요." });
+    const missing: string[] = [];
+    if (!userId) missing.push("userId");
+    if (!userName) missing.push("userName");
+    if (!examDate) missing.push("examDate");
+    if (!weldType) missing.push("weldType");
+    if (!material) missing.push("material");
+    if (!posture) missing.push("posture");
+    if (!result) missing.push("result");
+    if (missing.length > 0) {
+      return res.status(400).json({ error: `누락된 필드: ${missing.join(", ")}` });
     }
     try {
+      await ensureExamTable();
       const id = Date.now().toString() + Math.random().toString(36).substr(2, 6);
       await pool.query(
         `INSERT INTO exam_records
