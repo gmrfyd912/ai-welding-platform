@@ -25,6 +25,13 @@ async function ensureDateColumns() {
 }
 ensureDateColumns().catch(console.error);
 
+// name 컬럼 자동 추가 (없으면 username으로 채움)
+async function ensureNameColumn() {
+  await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS name TEXT`);
+  await pool.query(`UPDATE weld_users SET name = username WHERE name IS NULL`);
+}
+ensureNameColumn().catch(console.error);
+
 function rowToUser(u: any) {
   let perms: string[] = [];
   try { perms = JSON.parse(u.permissions || "[]"); } catch {}
