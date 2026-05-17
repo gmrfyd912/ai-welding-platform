@@ -81,7 +81,7 @@ export function registerExamRoutes(app: Express): void {
         `INSERT INTO exam_records
          (id, user_id, user_name, course_name, exam_date, weld_type, material, posture, result, issuer, cert_number, memo)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [id, userId, userName, courseName || null, examDate, weldType, material, posture, result, issuer || null, certNumber || null, memo || null]
+        [id, userId, userName || "미입력", courseName || null, examDate, weldType, material, posture, result, issuer || null, certNumber || null, memo || null]
       );
       const row = await pool.query(`SELECT * FROM exam_records WHERE id = $1`, [id]);
       res.json(rowToExam(row.rows[0]));
