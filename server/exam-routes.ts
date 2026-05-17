@@ -69,12 +69,8 @@ export function registerExamRoutes(app: Express): void {
     const { userId, userName, courseName, examDate, weldType, material, posture, result, issuer, certNumber, memo } = req.body;
     const missing: string[] = [];
     if (!userId) missing.push("userId");
-    if (!userName) missing.push("userName");
     if (!examDate) missing.push("examDate");
     if (!weldType) missing.push("weldType");
-    if (!material) missing.push("material");
-    if (!posture) missing.push("posture");
-    if (!result) missing.push("result");
     if (missing.length > 0) {
       return res.status(400).json({ error: `누락된 필드: ${missing.join(", ")}` });
     }
