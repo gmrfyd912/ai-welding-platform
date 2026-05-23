@@ -24,7 +24,17 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "usesFeatures": [
+        {
+          "name": "android.hardware.usb.host",
+          "required": false
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -33,7 +43,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://ai-welding-platform.onrender.com"
         }
       ],
       "expo-font",
@@ -50,11 +60,21 @@
         {
           "cameraPermission": "용접 결과물 사진을 촬영하기 위해 카메라 접근이 필요합니다."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "apiUrl": "https://ai-welding-platform.onrender.com",
+      "router": {
+        "origin": "https://ai-welding-platform.onrender.com"
+      },
+      "eas": {
+        "projectId": "6fd828ae-d379-48cd-91e0-103ed5af8e7e"
+      }
     }
   }
 }
