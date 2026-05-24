@@ -35,6 +35,7 @@ async function callFastApiAnalyze(params: {
   plateThickness: string;
   pipeOuterDiameterMm: string;
   language:       string;
+  analysisMode:   string;
 }): Promise<any> {
   const formData = new FormData();
 
@@ -61,6 +62,7 @@ async function callFastApiAnalyze(params: {
   formData.append("plate_thickness", params.plateThickness);
   formData.append("pipe_outer_diameter_mm", params.pipeOuterDiameterMm);
   formData.append("language",       params.language);
+  formData.append("analysis_mode",  params.analysisMode || "ai");
 
   const resp = await fetchWithTimeout(
     `${FASTAPI_BASE}/analyze-welding`,
@@ -89,7 +91,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
       process, posture, material,
       selfScore, beadType, passType, aiModel,
       previousResultsSummary, plateThickness, pipeOuterDiameterMm,
-      language,
+      language, analysisMode,
     } = req.body;
 
     const frontPhoto = photos?.front || imageBase64;
@@ -130,6 +132,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
         plateThickness: plateThickness || "",
         pipeOuterDiameterMm: pipeOuterDiameterMm ? String(pipeOuterDiameterMm) : "",
         language:       language || "ko",
+        analysisMode:   analysisMode || "ai",
       };
 
       // 콜드 스타트 사전 워밍업: FastAPI에 가벼운 ping (실패해도 무시)
@@ -180,12 +183,112 @@ export function registerWeldAnalysisRoute(app: Express): void {
         return res.status(400).json({ error: code, message: userMessage });
       }
       console.error(`[analyze-weld] 최종 실패 | 오류: ${err.message}`);
-      // 명확한 503 반환 → 모바일 앱이 Alert 표시 (폴백 데이터 혼선 방지)
       res.status(503).json({
         error: "AI_ANALYSIS_FAILED",
         message: "AI 분석 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
         detail: err.message?.slice(0, 200),
       });
+    }
+  });
+
+  // ── 빠른 측정 결과를 AI 종합 분석으로 재분석 ─────────────────────
+  app.post("/api/reanalyze", largeBodyParser, async (req: Request, res: Response) => {
+    const { resultId, aiModel } = req.body;
+    if (!resultId) return res.status(400).json({ error: "resultId 필요" });
+
+    try {
+      const dbRes = await pool.query(
+        "SELECT * FROM weld_results WHERE id = $1",
+        [resultId]
+      );
+      if (dbRes.rows.length === 0) return res.status(404).json({ error: "결과를 찾을 수 없습니다." });
+
+      const row = dbRes.rows[0];
+      const photos = row.photos as { front?: string; side?: string; back?: string } | null;
+      const frontUrl = photos?.front || row.photo_uri;
+      if (!frontUrl) return res.status(400).json({ error: "사진 데이터가 없습니다." });
+
+      const urlToBase64 = async (url: string): Promise<string | undefined> => {
+        try {
+          if (url.startsWith("data:")) return url.split(",")[1];
+          const resp = await fetchWithTimeout(url, { method: "GET" }, 15000);
+          if (!resp.ok) return undefined;
+          const buf = await resp.arrayBuffer();
+          return Buffer.from(buf).toString("base64");
+        } catch { return undefined; }
+      };
+
+      const frontBase64 = await urlToBase64(frontUrl);
+      if (!frontBase64) return res.status(400).json({ error: "사진을 가져올 수 없습니다." });
+      const sideBase64 = photos?.side ? await urlToBase64(photos.side) : undefined;
+      const backBase64 = photos?.back ? await urlToBase64(photos.back) : undefined;
+
+      let adminFeedback = "";
+      try {
+        const fb = await pool.query(
+          "SELECT feedback_text FROM admin_feedback ORDER BY created_at DESC LIMIT 20"
+        );
+        if (fb.rows.length > 0) {
+          adminFeedback = fb.rows.map((r: any, i: number) => `${i + 1}. ${r.feedback_text}`).join("\n");
+        }
+      } catch {}
+
+      const aiData = await callFastApiAnalyze({
+        frontPhoto: frontBase64,
+        sidePhoto:  sideBase64,
+        backPhoto:  backBase64,
+        process:    row.process  || "FCAW",
+        posture:    row.posture  || "1G",
+        material:   row.material || "탄소강 평판",
+        beadType:   row.bead_type || "위빙 비드",
+        passType:   "",
+        aiModel:    aiModel || "gpt",
+        adminFeedback,
+        userHistory:        "",
+        plateThickness:     "",
+        pipeOuterDiameterMm: "",
+        language:    "ko",
+        analysisMode: "ai",
+      });
+
+      await pool.query(`
+        UPDATE weld_results SET
+          ai_score           = $1,
+          overall_verdict    = $2,
+          bead_analysis      = $3,
+          defects            = $4,
+          defect_locations   = $5,
+          photo_analyses     = $6,
+          improvements       = $7,
+          comprehensive_report = $8,
+          top3_defects       = $9
+        WHERE id = $10
+      `, [
+        aiData.aiScore,
+        aiData.overallVerdict,
+        JSON.stringify(aiData.beadAnalysis),
+        JSON.stringify(aiData.defects),
+        JSON.stringify(aiData.defectLocations ?? []),
+        aiData.photoAnalyses ? JSON.stringify(aiData.photoAnalyses) : null,
+        JSON.stringify(aiData.improvements ?? []),
+        aiData.comprehensiveReport ?? null,
+        JSON.stringify(aiData.top3Defects ?? []),
+        resultId,
+      ]);
+
+      console.log(`[reanalyze] 완료: ${resultId} | aiScore=${aiData.aiScore}`);
+      res.json(aiData);
+    } catch (err: any) {
+      console.error("[reanalyze] 오류:", err);
+      if (err?.status === 400) {
+        let userMessage = "용접 사진을 인식하지 못했습니다.";
+        try {
+          const parsed = JSON.parse(err.body ?? "{}");
+          if (parsed?.message) userMessage = parsed.message;
+        } catch {}
+        return res.status(400).json({ error: "INVALID_WELD_PHOTO", message: userMessage });
+      }
+      res.status(500).json({ error: "재분석 실패", message: err.message?.slice(0, 200) });
     }
   });
 }

@@ -456,7 +456,7 @@ const reportStyles = StyleSheet.create({
 export default function DiagnosisScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
-  const { getResultById, getUserResults, deleteResult, results: allResults } = useWelding();
+  const { getResultById, getUserResults, deleteResult, results: allResults, refreshResults } = useWelding();
   const { user } = useAuth();
   const { t } = useLanguage();
   const isAdmin = user?.username === "admin";
@@ -469,6 +469,7 @@ export default function DiagnosisScreen() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [selectedPhotoView, setSelectedPhotoView] = useState<PhotoView>("front");
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
 
   const zoomScale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -808,6 +809,30 @@ export default function DiagnosisScreen() {
     }
   };
 
+  const isQuickMode = !result.comprehensiveReport && (!result.improvements || result.improvements.length === 0);
+
+  const handleReanalyze = async () => {
+    setIsReanalyzing(true);
+    try {
+      const { getApiUrl } = await import("@/lib/query-client");
+      const apiUrl = new URL("/api/reanalyze", getApiUrl()).toString();
+      const resp = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resultId: result.id }),
+      });
+      if (resp.ok) {
+        await refreshResults();
+      } else {
+        Alert.alert("오류", "재분석에 실패했습니다. 잠시 후 다시 시도해주세요.");
+      }
+    } catch {
+      Alert.alert("오류", "네트워크 오류가 발생했습니다.");
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
+
   return (
     <View style={[styles.container]}>
       <LinearGradient colors={[Colors.bg, "#0D1528", Colors.bg]} style={StyleSheet.absoluteFill} />
@@ -1052,6 +1077,30 @@ export default function DiagnosisScreen() {
           )}
         </SectionCard>
 
+        {isQuickMode ? (
+          <SectionCard title="빠른 측정 모드" icon="flash-outline">
+            <Text style={{ color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 14, lineHeight: 22 }}>
+              빠른 측정 모드로 분석된 결과입니다.{"\n"}AI 종합 분석 리포트와 개선 제안을 보려면 아래에서 재분석을 실행하세요.
+            </Text>
+            <Pressable
+              onPress={handleReanalyze}
+              disabled={isReanalyzing}
+              style={[styles.reanalyzeBtn, isReanalyzing && { opacity: 0.6 }]}
+            >
+              {isReanalyzing ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="robot-outline" size={18} color="#fff" />
+                  <Text style={styles.reanalyzeBtnText}>AI 종합 분석 실행</Text>
+                </>
+              )}
+            </Pressable>
+            <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, textAlign: "center" }}>
+              AI 분석은 30~60초 소요됩니다
+            </Text>
+          </SectionCard>
+        ) : (
         <SectionCard title={t("diag_aiReport")} icon="robot">
           <View style={[styles.verdictBanner, {
             backgroundColor: result.overallVerdict === "PASS" ? Colors.success + "22" : Colors.danger + "22",
@@ -1146,6 +1195,7 @@ export default function DiagnosisScreen() {
             </View>
           ) : null}
         </SectionCard>
+        )}
 
         <SectionCard title={t("diag_heatmap")} icon="eye-outline">
           {result.photoUri ? (
@@ -1316,17 +1366,19 @@ export default function DiagnosisScreen() {
           <ScoreCompareBar selfScore={result.selfScore} aiScore={result.aiScore} t={t} />
         </SectionCard>
 
-        <SectionCard title={t("diag_improvements")} icon="lightbulb-on-outline">
-          <Text style={styles.improvementSubtitle}>
-            {userResults.length > 1 ? t("diag_improvementMulti").replace("{n}", String(userResults.length)) : t("diag_improvementSingle")}
-          </Text>
-          {result.improvements.map((tip, i) => (
-            <View key={i} style={styles.improvementRow}>
-              <View style={[styles.improvementDot, { backgroundColor: i === 0 ? Colors.danger : i === 1 ? Colors.warning : Colors.primary }]} />
-              <Text style={styles.improvementText}>{tip}</Text>
-            </View>
-          ))}
-        </SectionCard>
+        {!isQuickMode && (
+          <SectionCard title={t("diag_improvements")} icon="lightbulb-on-outline">
+            <Text style={styles.improvementSubtitle}>
+              {userResults.length > 1 ? t("diag_improvementMulti").replace("{n}", String(userResults.length)) : t("diag_improvementSingle")}
+            </Text>
+            {result.improvements.map((tip, i) => (
+              <View key={i} style={styles.improvementRow}>
+                <View style={[styles.improvementDot, { backgroundColor: i === 0 ? Colors.danger : i === 1 ? Colors.warning : Colors.primary }]} />
+                <Text style={styles.improvementText}>{tip}</Text>
+              </View>
+            ))}
+          </SectionCard>
+        )}
 
         <SectionCard title={t("diag_trend")} icon="chart-line">
           {(() => {
@@ -1978,6 +2030,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   fbSubmitBtnText: {
+    color: "#fff",
+    fontFamily: "Inter_700Bold",
+    fontSize: 15,
+  },
+  reanalyzeBtn: {
+    backgroundColor: Colors.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  reanalyzeBtnText: {
     color: "#fff",
     fontFamily: "Inter_700Bold",
     fontSize: 15,

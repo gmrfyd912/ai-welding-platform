@@ -119,6 +119,7 @@ export default function RegisterPhotoScreen() {
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<"quick" | "ai">("ai");
 
   const selfScoreNum = parseInt(selfScore) || 0;
 
@@ -249,6 +250,7 @@ export default function RegisterPhotoScreen() {
           aiModel: selectedAI,
           isFillet,
           hasLaser,
+          analysisMode,
         }),
       });
 
@@ -626,6 +628,29 @@ export default function RegisterPhotoScreen() {
           </Pressable>
         </View>
 
+        {/* 분석 모드 선택기 */}
+        <View style={styles.modeSelector}>
+          <Pressable
+            style={[styles.modeOption, analysisMode === "quick" && styles.modeOptionActive]}
+            onPress={() => { setAnalysisMode("quick"); Haptics.selectionAsync(); }}
+          >
+            <Ionicons name="flash-outline" size={14} color={analysisMode === "quick" ? Colors.primary : Colors.textMuted} />
+            <Text style={[styles.modeOptionText, analysisMode === "quick" && styles.modeOptionTextActive]}>빠른 측정</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.modeOption, analysisMode === "ai" && styles.modeOptionActive]}
+            onPress={() => { setAnalysisMode("ai"); Haptics.selectionAsync(); }}
+          >
+            <MaterialCommunityIcons name="robot-outline" size={14} color={analysisMode === "ai" ? Colors.primary : Colors.textMuted} />
+            <Text style={[styles.modeOptionText, analysisMode === "ai" && styles.modeOptionTextActive]}>AI 종합 분석</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.modeDesc}>
+          {analysisMode === "quick"
+            ? "측정값만 즉시 표시 · AI 비용 없음 · 5초 이내"
+            : "AI 리포트 + 개선 제안 · 30~60초 소요"}
+        </Text>
+
         <Pressable
           style={({ pressed }) => [styles.submitBtn, pressed && { opacity: 0.85 }, isAnalyzing && { opacity: 0.6 }]}
           onPress={handleSubmit}
@@ -909,6 +934,19 @@ const styles = StyleSheet.create({
   },
   aiOptionSubActive: {
     color: Colors.primary + "CC",
+  },
+  modeSelector: { flexDirection: "row", gap: 8 },
+  modeOption: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 9, borderRadius: 10,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.card,
+  },
+  modeOptionActive: { borderColor: Colors.primary, backgroundColor: Colors.primary + "15" },
+  modeOptionText: { color: Colors.textMuted, fontFamily: "Inter_600SemiBold", fontSize: 13 },
+  modeOptionTextActive: { color: Colors.primary },
+  modeDesc: {
+    color: Colors.textMuted, fontFamily: "Inter_400Regular",
+    fontSize: 12, textAlign: "center", fontStyle: "italic",
   },
   footer: {
     position: "absolute",

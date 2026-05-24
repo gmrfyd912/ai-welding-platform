@@ -596,6 +596,7 @@ async def analyze_welding_full(
     is_fillet: str = Form("false"),
     has_laser: str = Form("false"),
     laser_angle_deg: str = Form("45"),
+    analysis_mode: str = Form("ai"),
 ):
     # Map language code → human-readable name for the AI prompt
     LANG_NAMES_FOR_AI = {
@@ -692,48 +693,49 @@ async def analyze_welding_full(
           f"판정={weld_data['is_pass']}")
 
     # ── 5. gpt_advisor: 누적 이력 + 모든 사진(정면/측면/이면) 기반 종합 진단 ──
+    context_meta = {
+        "process":         process,
+        "posture":         posture,
+        "material":        material,
+        "bead_type":       bead_type,
+        "pass_type":       pass_type,
+        "plate_thickness": plate_thickness,
+    }
     expert_advice = {}
-    try:
-        context_meta = {
-            "process":         process,
-            "posture":         posture,
-            "material":        material,
-            "bead_type":       bead_type,
-            "pass_type":       pass_type,
-            "plate_thickness": plate_thickness,
-        }
-        # 업로드된 모든 사진을 GPT-4o 비전에 함께 전달 — 정면 high, 보조 low
-        gpt_images = [{"label": "정면", "base64": image_base64}]
-        if has_side_photo and side_vision_data is not None:
-            gpt_images.append({
-                "label": "측면",
-                "base64": base64.b64encode(side_bytes).decode(),
-            })
-        if back_vision_data is not None:
-            gpt_images.append({
-                "label": "이면",
-                "base64": base64.b64encode(back_bytes).decode(),
-            })
+    if analysis_mode != "quick":
+        try:
+            # 업로드된 모든 사진을 GPT-4o 비전에 함께 전달 — 정면 high, 보조 low
+            gpt_images = [{"label": "정면", "base64": image_base64}]
+            if has_side_photo and side_vision_data is not None:
+                gpt_images.append({
+                    "label": "측면",
+                    "base64": base64.b64encode(side_bytes).decode(),
+                })
+            if back_vision_data is not None:
+                gpt_images.append({
+                    "label": "이면",
+                    "base64": base64.b64encode(back_bytes).decode(),
+                })
 
-        # 측면 사진이 업로드됐어도 측정에 실패했으면 GPT 가 높이 분석을 못 하도록
-        # 실제 측정 성공 여부로 플래그 전달 (업로드 여부 != 측정 성공)
-        has_side_measurement = side_vision_data is not None
-        expert_advice = await get_expert_advice(
-            gpt_images, weld_data,
-            user_history=user_history,
-            context_meta=context_meta,
-            admin_feedback=admin_feedback,
-            language_name=language_name,
-            has_side_photo=has_side_measurement,
-            per_photo_bead=weld_data.get("per_photo_bead"),
-            fillet_data=fillet_result,
-        )
-        rep_len = len(str(expert_advice.get("comprehensiveReport", "")))
-        n_imp   = len(expert_advice.get("improvements", []) or [])
-        print(f"[GPT Advisor] 리포트 {rep_len}자 / 개선책 {n_imp}개 / "
-              f"이력 {'있음' if user_history else '없음'} / 사진 {len(gpt_images)}장 종합")
-    except Exception as e:
-        print(f"[GPT Advisor] 오류: {e} — 측정값 기반 폴백 리포트로 대체")
+            # 측면 사진이 업로드됐어도 측정에 실패했으면 GPT 가 높이 분석을 못 하도록
+            # 실제 측정 성공 여부로 플래그 전달 (업로드 여부 != 측정 성공)
+            has_side_measurement = side_vision_data is not None
+            expert_advice = await get_expert_advice(
+                gpt_images, weld_data,
+                user_history=user_history,
+                context_meta=context_meta,
+                admin_feedback=admin_feedback,
+                language_name=language_name,
+                has_side_photo=has_side_measurement,
+                per_photo_bead=weld_data.get("per_photo_bead"),
+                fillet_data=fillet_result,
+            )
+            rep_len = len(str(expert_advice.get("comprehensiveReport", "")))
+            n_imp   = len(expert_advice.get("improvements", []) or [])
+            print(f"[GPT Advisor] 리포트 {rep_len}자 / 개선책 {n_imp}개 / "
+                  f"이력 {'있음' if user_history else '없음'} / 사진 {len(gpt_images)}장 종합")
+        except Exception as e:
+            print(f"[GPT Advisor] 오류: {e} — 측정값 기반 폴백 리포트로 대체")
 
     # ── 6. 명장 마크다운 리포트 (vision 측정값 기반) ────────────────
     raw_defects_for_report = [
@@ -747,15 +749,16 @@ async def analyze_welding_full(
         "straightness_error_mm": weld_data["straightness_variance"],
     }
     pipeline_report = None
-    try:
-        pipeline_report = await generate_expert_report(
-            process,
-            {"defects": raw_defects_for_report, "bead_quality": bead_quality_for_report},
-            ai_model, is_pipe,
-            language_name=language_name,
-        )
-    except Exception as e:
-        print(f"[명장 리포트] 오류: {e}")
+    if analysis_mode != "quick":
+        try:
+            pipeline_report = await generate_expert_report(
+                process,
+                {"defects": raw_defects_for_report, "bead_quality": bead_quality_for_report},
+                ai_model, is_pipe,
+                language_name=language_name,
+            )
+        except Exception as e:
+            print(f"[명장 리포트] 오류: {e}")
 
     # ── 7. beadAnalysis 구조 — 종합(평균) + 사진별 ──────────────────
     # 종합: 모든 사진 비드 점수의 평균 (welding_calculator 가 이미 평균 계산)
@@ -873,18 +876,23 @@ async def analyze_welding_full(
     straightness_lines_back  = back_vision_data.get("straightness_lines", []) if back_vision_data else []
 
     # ── 9. GPT Advisor 결과에서 필드 추출 ──────────────────────────
-    improvements = _extract_list(expert_advice, [
-        "improvements", "교정방법", "교정_방법", "correction", "개선사항", "recommendations",
-    ])
-    comprehensive_report = _extract_str(expert_advice, [
-        "comprehensiveReport", "종합분석", "원인분석", "analysis", "report", "summary",
-    ])
-    if not comprehensive_report or len(comprehensive_report) < 50:
-        comprehensive_report = _build_fallback_report(weld_data, context_meta, has_side_photo)
-        print(f"[GPT Advisor] 폴백 리포트 생성 — {len(comprehensive_report)}자")
-    top3_defects = _extract_list(expert_advice, ["top3Defects", "주요결함", "top_defects"])
-    if top3_defects == ["전문가 분석이 완료되었습니다. 상세 리포트를 확인하세요."]:
+    if analysis_mode == "quick":
+        improvements = []
+        comprehensive_report = None
         top3_defects = weld_data["detected_defects"][:3]
+    else:
+        improvements = _extract_list(expert_advice, [
+            "improvements", "교정방법", "교정_방법", "correction", "개선사항", "recommendations",
+        ])
+        comprehensive_report = _extract_str(expert_advice, [
+            "comprehensiveReport", "종합분석", "원인분석", "analysis", "report", "summary",
+        ])
+        if not comprehensive_report or len(comprehensive_report) < 50:
+            comprehensive_report = _build_fallback_report(weld_data, context_meta, has_side_photo)
+            print(f"[GPT Advisor] 폴백 리포트 생성 — {len(comprehensive_report)}자")
+        top3_defects = _extract_list(expert_advice, ["top3Defects", "주요결함", "top_defects"])
+        if top3_defects == ["전문가 분석이 완료되었습니다. 상세 리포트를 확인하세요."]:
+            top3_defects = weld_data["detected_defects"][:3]
 
     print(f"━━ 최종: aiScore={weld_data['final_score']} | 판정={weld_data['is_pass']} | "
           f"비드={weld_data['bead_total_score']} (폭{weld_data['width_score']}/직진{weld_data['straightness_score']}"
