@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { DeviceMotion } from "expo-sensors";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
@@ -19,31 +20,35 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onCapture: (uri: string) => void;
+  targetAngle?: number;
 }
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-// 가이드 영역 좌표 계산 (Flutter 코드 기준)
-const CENTER_W = SCREEN_W * 0.75;
-const CENTER_H = SCREEN_H * 0.48;
-const CENTER_X = (SCREEN_W - CENTER_W) / 2;
-const CENTER_Y = (SCREEN_H - CENTER_H) / 2 - 20;
+const GAUGE_H = SCREEN_H * 0.48;
+const GAUGE_W = 28;
+const GAUGE_MIN = 0;
+const GAUGE_MAX = 90;
 
-// ArUco 마커 가이드 (용접 비드 영역 우측 상단)
-const MARKER_SIZE = 70;
-const MARKER_X = CENTER_X + CENTER_W - MARKER_SIZE - 10;
-const MARKER_Y = CENTER_Y + 14;
-
-// 꺾쇠 길이
-const CORNER_LEN = 18;
-const CORNER_THICK = 3;
-
-export default function WeldCameraModal({ visible, onClose, onCapture }: Props) {
+export default function WeldCameraModal({ visible, onClose, onCapture, targetAngle = 90 }: Props) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [isTaking, setIsTaking] = useState(false);
+  const [currentAngle, setCurrentAngle] = useState(90);
+
+  useEffect(() => {
+    if (!visible || Platform.OS === "web") return;
+    DeviceMotion.setUpdateInterval(150);
+    const sub = DeviceMotion.addListener((data) => {
+      const { beta = 0, gamma = 0 } = data.rotation ?? {};
+      const betaDeg = Math.abs((beta * 180) / Math.PI);
+      const gammaDeg = Math.abs((gamma * 180) / Math.PI);
+      setCurrentAngle(Math.round(Math.max(betaDeg, gammaDeg)));
+    });
+    return () => sub.remove();
+  }, [visible]);
 
   const handleCapture = useCallback(async () => {
     if (!cameraRef.current || isTaking) return;
@@ -53,15 +58,27 @@ export default function WeldCameraModal({ visible, onClose, onCapture }: Props) 
         quality: 0.85,
         skipProcessing: false,
       });
-      if (photo?.uri) {
-        onCapture(photo.uri);
-      }
+      if (photo?.uri) onCapture(photo.uri);
     } catch (e) {
       console.warn("촬영 실패:", e);
     } finally {
       setIsTaking(false);
     }
   }, [isTaking, onCapture]);
+
+  const angleOk = Math.abs(currentAngle - targetAngle) <= 3;
+  const badgeColor = angleOk ? Colors.success : Colors.warning;
+
+  // 게이지 상 현재 위치 (0°=하단, 90°=상단)
+  const clampedAngle = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, currentAngle));
+  const clampedTarget = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, targetAngle));
+  const angleToY = (deg: number) =>
+    GAUGE_H - ((deg - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * GAUGE_H;
+  const needleY = angleToY(clampedAngle);
+  const targetY = angleToY(clampedTarget);
+
+  // 허용 오차 ±3° 범위의 게이지 높이
+  const tolerancePx = (3 / (GAUGE_MAX - GAUGE_MIN)) * GAUGE_H;
 
   const renderContent = () => {
     if (Platform.OS === "web") {
@@ -103,36 +120,73 @@ export default function WeldCameraModal({ visible, onClose, onCapture }: Props) 
           facing="back"
         />
 
-        {/* ── 가이드 오버레이 (4방향 어두운 마스크) ── */}
-        {/* 상단 */}
-        <View style={[styles.mask, { top: 0, left: 0, right: 0, height: CENTER_Y }]} />
-        {/* 하단 */}
-        <View style={[styles.mask, { top: CENTER_Y + CENTER_H, left: 0, right: 0, bottom: 0 }]} />
-        {/* 좌측 */}
-        <View style={[styles.mask, { top: CENTER_Y, left: 0, width: CENTER_X, height: CENTER_H }]} />
-        {/* 우측 */}
-        <View style={[styles.mask, { top: CENTER_Y, left: CENTER_X + CENTER_W, right: 0, height: CENTER_H }]} />
-
-        {/* ── 용접 비드 영역 테두리 (초록색 꺾쇠) ── */}
-        <CornerBrackets
-          x={CENTER_X} y={CENTER_Y} w={CENTER_W} h={CENTER_H}
-          color="#00FF88" thick={CORNER_THICK} len={CORNER_LEN * 1.8}
-        />
-
-        {/* ── ArUco 마커 가이드 (노란색 꺾쇠 + 라벨) ── */}
-        <CornerBrackets
-          x={MARKER_X} y={MARKER_Y} w={MARKER_SIZE} h={MARKER_SIZE}
-          color="#FFD700" thick={CORNER_THICK} len={CORNER_LEN}
-        />
-        <View style={[styles.markerLabel, { left: MARKER_X, top: MARKER_Y + MARKER_SIZE + 4 }]}>
-          <Text style={styles.markerLabelText}>ArUco 30mm</Text>
-        </View>
-
-        {/* ── 안내 텍스트 ── */}
+        {/* ── 상단 안내 텍스트 ── */}
         <View style={[styles.instructionBox, { top: insets.top + 16 }]}>
           <Text style={styles.instructionText}>
-            {t("camera_arucoInstr")}
+            비드와 아루코마커가 프레임 안에 들어오도록 촬영하세요
           </Text>
+        </View>
+
+        {/* ── 상단 중앙 각도 뱃지 ── */}
+        <View style={[styles.angleBadge, { top: insets.top + 60, borderColor: badgeColor + "88", backgroundColor: badgeColor + "22" }]}>
+          <Ionicons
+            name={angleOk ? "checkmark-circle" : "alert-circle-outline"}
+            size={14}
+            color={badgeColor}
+          />
+          <Text style={[styles.angleBadgeText, { color: badgeColor }]}>
+            {currentAngle}° / {targetAngle}°
+          </Text>
+          <Text style={[styles.angleBadgeSubText, { color: badgeColor }]}>
+            {angleOk ? "적정 각도" : `${Math.abs(currentAngle - targetAngle)}° 차이`}
+          </Text>
+        </View>
+
+        {/* ── 우측 세로 각도 게이지 ── */}
+        <View style={[styles.gaugeContainer, { top: (SCREEN_H - GAUGE_H) / 2, right: 16 }]}>
+          {/* 배경 트랙 */}
+          <View style={styles.gaugeTrack} />
+
+          {/* ±3° 허용 오차 초록 구간 */}
+          <View
+            style={[
+              styles.gaugeOkZone,
+              {
+                top: Math.max(0, targetY - tolerancePx),
+                height: tolerancePx * 2,
+              },
+            ]}
+          />
+
+          {/* 목표 각도 선 */}
+          <View style={[styles.gaugeTargetLine, { top: targetY }]} />
+
+          {/* 목표 각도 라벨 */}
+          <Text style={[styles.gaugeTargetLabel, { top: targetY - 16 }]}>
+            {targetAngle}°
+          </Text>
+
+          {/* 현재 각도 바늘 */}
+          <View
+            style={[
+              styles.gaugeNeedle,
+              {
+                top: needleY - 8,
+                backgroundColor: badgeColor,
+                borderColor: badgeColor,
+              },
+            ]}
+          />
+
+          {/* 눈금 텍스트 (0, 45, 90) */}
+          {[0, 45, 90].map((deg) => (
+            <Text
+              key={deg}
+              style={[styles.gaugeTick, { top: angleToY(deg) - 7 }]}
+            >
+              {deg}°
+            </Text>
+          ))}
         </View>
 
         {/* ── 하단: 닫기 + 촬영 버튼 ── */}
@@ -167,46 +221,6 @@ export default function WeldCameraModal({ visible, onClose, onCapture }: Props) 
   );
 }
 
-// 꺾쇠(L자) 코너 가이드 컴포넌트
-function CornerBrackets({
-  x, y, w, h, color, thick, len,
-}: {
-  x: number; y: number; w: number; h: number;
-  color: string; thick: number; len: number;
-}) {
-  const corners = [
-    { top: y, left: x },
-    { top: y, left: x + w - len },
-    { top: y + h - thick, left: x },
-    { top: y + h - thick, left: x + w - len },
-  ];
-
-  return (
-    <>
-      {/* 수평 바 4개 */}
-      {corners.map((c, i) => (
-        <View key={`h${i}`} style={{
-          position: "absolute", top: c.top, left: c.left,
-          width: len, height: thick, backgroundColor: color,
-        }} />
-      ))}
-
-      {/* 수직 바 4개 */}
-      {[
-        { top: y, left: x },
-        { top: y, left: x + w - thick },
-        { top: y + h - len, left: x },
-        { top: y + h - len, left: x + w - thick },
-      ].map((c, i) => (
-        <View key={`v${i}`} style={{
-          position: "absolute", top: c.top, left: c.left,
-          width: thick, height: len, backgroundColor: color,
-        }} />
-      ))}
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -218,10 +232,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#000",
     padding: 32,
-  },
-  mask: {
-    position: "absolute",
-    backgroundColor: "rgba(0,0,0,0.55)",
   },
   instructionBox: {
     position: "absolute",
@@ -242,17 +252,83 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     lineHeight: 22,
   },
-  markerLabel: {
+  angleBadge: {
     position: "absolute",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    alignSelf: "center",
+    left: 0,
+    right: 0,
+    marginHorizontal: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    zIndex: 10,
+  },
+  angleBadgeText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  angleBadgeSubText: {
+    fontSize: 12,
+    fontWeight: "500",
+    opacity: 0.85,
+  },
+  gaugeContainer: {
+    position: "absolute",
+    width: GAUGE_W,
+    height: GAUGE_H,
+    zIndex: 10,
+  },
+  gaugeTrack: {
+    position: "absolute",
+    left: GAUGE_W / 2 - 2,
+    top: 0,
+    width: 4,
+    height: GAUGE_H,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    borderRadius: 2,
+  },
+  gaugeOkZone: {
+    position: "absolute",
+    left: GAUGE_W / 2 - 4,
+    width: 8,
+    backgroundColor: Colors.success + "55",
     borderRadius: 4,
   },
-  markerLabelText: {
-    color: "#FFD700",
+  gaugeTargetLine: {
+    position: "absolute",
+    left: 2,
+    width: GAUGE_W - 4,
+    height: 2,
+    backgroundColor: Colors.success,
+    borderRadius: 1,
+  },
+  gaugeTargetLabel: {
+    position: "absolute",
+    right: GAUGE_W + 2,
+    color: Colors.success,
     fontSize: 10,
     fontWeight: "700",
+  },
+  gaugeNeedle: {
+    position: "absolute",
+    left: GAUGE_W / 2 - 8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    backgroundColor: Colors.warning,
+  },
+  gaugeTick: {
+    position: "absolute",
+    right: GAUGE_W + 2,
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 9,
+    fontWeight: "600",
   },
   bottomBar: {
     position: "absolute",
