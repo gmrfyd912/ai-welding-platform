@@ -610,25 +610,7 @@ export default function RegisterPhotoScreen() {
       </KeyboardAwareScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        {/* AI 모델 선택기 */}
-        <View style={styles.aiSelector}>
-          <Pressable
-            style={[styles.aiOption, selectedAI === "gpt-4o" && styles.aiOptionActive]}
-            onPress={() => setSelectedAI("gpt-4o")}
-          >
-            <Text style={[styles.aiOptionText, selectedAI === "gpt-4o" && styles.aiOptionTextActive]}>GPT-4o</Text>
-            <Text style={[styles.aiOptionSub, selectedAI === "gpt-4o" && styles.aiOptionSubActive]}>OpenAI</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.aiOption, selectedAI === "claude-sonnet" && styles.aiOptionActive]}
-            onPress={() => setSelectedAI("claude-sonnet")}
-          >
-            <Text style={[styles.aiOptionText, selectedAI === "claude-sonnet" && styles.aiOptionTextActive]}>Claude Sonnet</Text>
-            <Text style={[styles.aiOptionSub, selectedAI === "claude-sonnet" && styles.aiOptionSubActive]}>Anthropic</Text>
-          </Pressable>
-        </View>
-
-        {/* 분석 모드 선택기 */}
+        {/* 1단계: 분석 모드 선택 */}
         <View style={styles.modeSelector}>
           <Pressable
             style={[styles.modeOption, analysisMode === "quick" && styles.modeOptionActive]}
@@ -645,11 +627,26 @@ export default function RegisterPhotoScreen() {
             <Text style={[styles.modeOptionText, analysisMode === "ai" && styles.modeOptionTextActive]}>AI 종합 분석</Text>
           </Pressable>
         </View>
-        <Text style={styles.modeDesc}>
-          {analysisMode === "quick"
-            ? "측정값만 즉시 표시 · AI 비용 없음 · 5초 이내"
-            : "AI 리포트 + 개선 제안 · 30~60초 소요"}
-        </Text>
+
+        {/* 2단계: AI 모델 선택 (AI 종합 분석 선택 시에만 표시) */}
+        {analysisMode === "ai" && (
+          <View style={styles.aiSelector}>
+            <Pressable
+              style={[styles.aiOption, selectedAI === "gpt-4o" && styles.aiOptionActive]}
+              onPress={() => setSelectedAI("gpt-4o")}
+            >
+              <Text style={[styles.aiOptionText, selectedAI === "gpt-4o" && styles.aiOptionTextActive]}>GPT-4o</Text>
+              <Text style={[styles.aiOptionSub, selectedAI === "gpt-4o" && styles.aiOptionSubActive]}>OpenAI</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.aiOption, selectedAI === "claude-sonnet" && styles.aiOptionActive]}
+              onPress={() => setSelectedAI("claude-sonnet")}
+            >
+              <Text style={[styles.aiOptionText, selectedAI === "claude-sonnet" && styles.aiOptionTextActive]}>Claude Sonnet</Text>
+              <Text style={[styles.aiOptionSub, selectedAI === "claude-sonnet" && styles.aiOptionSubActive]}>Anthropic</Text>
+            </Pressable>
+          </View>
+        )}
 
         <Pressable
           style={({ pressed }) => [styles.submitBtn, pressed && { opacity: 0.85 }, isAnalyzing && { opacity: 0.6 }]}
@@ -902,7 +899,6 @@ const styles = StyleSheet.create({
   aiSelector: {
     flexDirection: "row",
     gap: 10,
-    marginBottom: 12,
   },
   aiOption: {
     flex: 1,
@@ -944,10 +940,6 @@ const styles = StyleSheet.create({
   modeOptionActive: { borderColor: Colors.primary, backgroundColor: Colors.primary + "15" },
   modeOptionText: { color: Colors.textMuted, fontFamily: "Inter_600SemiBold", fontSize: 13 },
   modeOptionTextActive: { color: Colors.primary },
-  modeDesc: {
-    color: Colors.textMuted, fontFamily: "Inter_400Regular",
-    fontSize: 12, textAlign: "center", fontStyle: "italic",
-  },
   footer: {
     position: "absolute",
     bottom: 0,
@@ -955,6 +947,7 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
+    gap: 8,
     backgroundColor: Colors.bg + "EE",
     borderTopWidth: 1,
     borderTopColor: Colors.border,
