@@ -78,7 +78,7 @@ def _build_system_prompt(language_name: str = "Korean", has_side_photo: bool = F
     )
 
 
-def _summarize_current(weld_data: dict, context_meta: dict) -> str:
+def _summarize_current(weld_data: dict, context_meta: dict, fillet_data=None) -> str:
     defects = weld_data.get("detected_defects", []) or []
     defect_str = ", ".join(defects) if defects else "검출된 결함 없음"
     width_var = weld_data.get("width_variance", 0)
@@ -104,6 +104,27 @@ def _summarize_current(weld_data: dict, context_meta: dict) -> str:
         f"- 비드 종합 점수 (사진별 평균): {weld_data.get('bead_total_score','?')}점 "
         f"(폭{weld_data.get('width_score','?')}/직진{weld_data.get('straightness_score','?')}"
         f"{('/높이' + str(weld_data.get('height_score'))) if weld_data.get('height_score') is not None else ''})\n"
+        + (
+            (
+                f"[필렛 용접 분석]\n"
+                f"- 비드 표면 너비: {fillet_data.get('beadWidth')}mm\n"
+                f"- 등각장(Z): {fillet_data.get('equalLeg', '-')}mm\n"
+                f"- 수직 각장(Z1): {fillet_data.get('unequalLeg', {}).get('z1', '-')}mm"
+                f" / 수평 각장(Z2): {fillet_data.get('unequalLeg', {}).get('z2', '-')}mm\n"
+                f"- 부등각장 여부: "
+                + (
+                    f"{'예 (차이 ' + str(fillet_data.get('unequalLeg', {}).get('difference', '?')) + 'mm)'}"
+                    if fillet_data.get('unequalLeg', {}).get('isUnequal', False)
+                    else "아니오"
+                )
+                + f"\n"
+                f"- 이론 목두께: {fillet_data.get('theoreticalThroat')}mm\n"
+                f"- 실제 목두께: {fillet_data.get('actualThroat', '-')}mm\n"
+                f"- 비드 형상: {fillet_data.get('convexity', {}).get('type', 'unknown')}"
+                f" ({fillet_data.get('convexity', {}).get('value_mm', 0)}mm)\n"
+            )
+            if fillet_data else ""
+        )
     )
 
 
@@ -148,6 +169,7 @@ async def get_expert_advice(
     language_name: str = "Korean",
     has_side_photo: bool = False,
     per_photo_bead: dict | None = None,
+    fillet_data=None,
 ):
     """
     GPT-4o 비전 종합 리포트 생성. images 리스트로 모든 사진(정면/측면/이면)을 함께 전달해
@@ -161,7 +183,7 @@ async def get_expert_advice(
     system_prompt = _build_system_prompt(language_name, has_side_photo=has_side_photo, n_photos=n_photos)
 
     user_text = (
-        _summarize_current(weld_data, context_meta)
+        _summarize_current(weld_data, context_meta, fillet_data=fillet_data)
         + _summarize_per_photo(per_photo_bead or {})
         + "\n"
         + _summarize_history(user_history)

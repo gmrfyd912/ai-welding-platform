@@ -726,6 +726,7 @@ async def analyze_welding_full(
             language_name=language_name,
             has_side_photo=has_side_measurement,
             per_photo_bead=weld_data.get("per_photo_bead"),
+            fillet_data=fillet_result,
         )
         rep_len = len(str(expert_advice.get("comprehensiveReport", "")))
         n_imp   = len(expert_advice.get("improvements", []) or [])
