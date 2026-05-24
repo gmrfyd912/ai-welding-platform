@@ -167,7 +167,10 @@ export function registerWeldAnalysisRoute(app: Express): void {
       if (!result) throw lastErr ?? new Error("FastAPI 호출 실패 (원인 불명)");
 
       console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
-      res.json(result);
+      res.json({
+        ...result,
+        laserAnalysis: result.visionMeasurement?.laser_analysis ?? null,
+      });
 
     } catch (err: any) {
       // 사용자 입력 문제 (400) — FastAPI의 사용자 친화 메시지를 그대로 전달

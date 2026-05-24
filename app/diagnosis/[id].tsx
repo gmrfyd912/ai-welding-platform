@@ -983,6 +983,101 @@ export default function DiagnosisScreen() {
           )}
         </SectionCard>
 
+        {result.laserAnalysis?.status === "success" && (() => {
+          const la = result.laserAnalysis!;
+          const convexColor =
+            la.convexity === "convex" ? "#f97316"
+            : la.convexity === "concave" ? "#3b82f6"
+            : Colors.success;
+          const convexBg =
+            la.convexity === "convex" ? "#fff7ed"
+            : la.convexity === "concave" ? "#eff6ff"
+            : "#f0fdf4";
+          const convexLabel =
+            la.convexity === "convex"
+              ? `볼록 (Convex) +${la.convexityMm.toFixed(2)}mm`
+              : la.convexity === "concave"
+              ? `오목 (Concave) -${la.convexityMm.toFixed(2)}mm`
+              : "평탄 (Flat)";
+
+          const profile = la.profile ?? [];
+          const LASER_W = SCREEN_W - 64;
+          const LASER_H = 80;
+          const PAD_X = 8;
+          const PAD_Y = 8;
+          const plotW = LASER_W - PAD_X * 2;
+          const plotH = LASER_H - PAD_Y * 2;
+          const allH = profile.map((p) => p.height_mm);
+          const minH = Math.min(...allH, 0);
+          const maxH = Math.max(...allH, 0.01);
+          const rangeH = maxH - minH || 0.01;
+          const zeroY = PAD_Y + plotH - ((0 - minH) / rangeH) * plotH;
+
+          return (
+            <SectionCard title="레이저 비드 형상 분석" icon="pulse-outline">
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <StatCard label="최대 높이" value={`${la.beadHeightMax.toFixed(2)}mm`} />
+                <StatCard label="최소 높이" value={`${la.beadHeightMin.toFixed(2)}mm`} />
+                <StatCard label="평균 높이" value={`${la.beadHeightAvg.toFixed(2)}mm`} />
+                <StatCard label="높이 편차" value={`${la.heightVariance.toFixed(2)}mm`} />
+              </View>
+
+              <View style={{
+                alignSelf: "flex-start",
+                backgroundColor: convexBg,
+                borderRadius: 20,
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                marginBottom: 12,
+              }}>
+                <Text style={{ color: convexColor, fontFamily: "Inter_700Bold", fontSize: 13 }}>
+                  {convexLabel}
+                </Text>
+              </View>
+
+              {profile.length >= 2 && (
+                <View style={{ marginBottom: 10 }}>
+                  <Svg width={LASER_W} height={LASER_H + PAD_Y}>
+                    <Line
+                      x1={PAD_X} y1={zeroY}
+                      x2={LASER_W - PAD_X} y2={zeroY}
+                      stroke={Colors.border} strokeWidth="1" strokeDasharray="4,3"
+                    />
+                    {profile.map((pt, i) => {
+                      const barX = PAD_X + (pt.x_pct / 100) * plotW;
+                      const barH = Math.abs((pt.height_mm / rangeH) * plotH);
+                      const barY = pt.height_mm >= 0 ? zeroY - barH : zeroY;
+                      const barColor = pt.height_mm >= 0 ? "#f97316" : "#3b82f6";
+                      const barW = Math.max(2, plotW / profile.length - 1);
+                      return (
+                        <Line
+                          key={i}
+                          x1={barX} y1={barY + barH}
+                          x2={barX} y2={barY}
+                          stroke={barColor} strokeWidth={barW}
+                          strokeLinecap="round"
+                        />
+                      );
+                    })}
+                  </Svg>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: PAD_X }}>
+                    <Text style={{ color: Colors.textMuted, fontSize: 10, fontFamily: "Inter_400Regular" }}>0%</Text>
+                    <Text style={{ color: Colors.textMuted, fontSize: 10, fontFamily: "Inter_400Regular" }}>비드 길이 방향</Text>
+                    <Text style={{ color: Colors.textMuted, fontSize: 10, fontFamily: "Inter_400Regular" }}>100%</Text>
+                  </View>
+                </View>
+              )}
+
+              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, marginBottom: 4 }}>
+                검출된 격자 간격: {la.laserGridSpacingMm.toFixed(2)}mm
+              </Text>
+              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, fontStyle: "italic" }}>
+                레이저 각도 기반 삼각함수 계산값
+              </Text>
+            </SectionCard>
+          );
+        })()}
+
         {result.filletAnalysis && (() => {
           const fa = result.filletAnalysis as FilletAnalysis;
           const convexColor =

@@ -148,6 +148,19 @@ export interface WeldingResult {
   top3Defects: string[];
   trendScores: number[];
   filletAnalysis?: FilletAnalysis | null;
+  laserAnalysis?: {
+    status: string;
+    beadHeightMax: number;
+    beadHeightMin: number;
+    beadHeightAvg: number;
+    heightVariance: number;
+    convexity: "convex" | "concave" | "flat";
+    convexityMm: number;
+    laserGridSpacingMm: number;
+    profile: Array<{ x_pct: number; height_mm: number }>;
+    worstPoint?: { x_pct: number; y_pct: number; height_mm: number };
+    message: string;
+  } | null;
 }
 
 interface WeldingContextValue {
