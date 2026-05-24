@@ -503,6 +503,80 @@ async def _call_roboflow(image_bytes: bytes, label: str) -> dict:
     return data
 
 
+# ==========================================
+# [필렛 분석] 각장/목두께/부등각장/오목볼록도
+# ==========================================
+def calculate_convexity(vision_data: dict) -> dict:
+    lines = vision_data.get("straightness_lines", [])
+    if not lines:
+        return {"type": "unknown", "value_mm": 0}
+    deviation = lines[0].get("deviation_mm", 0)
+    return {
+        "type": "convex" if deviation > 0 else "concave",
+        "value_mm": round(deviation, 2),
+        "note": "레이저 있을 때 더 정확한 측정 가능",
+    }
+
+
+def calculate_unequal_legs(vision_data: dict, ppm: float) -> dict:
+    lines = vision_data.get("straightness_lines", [])
+    if not lines:
+        return {"z1": None, "z2": None, "isUnequal": False}
+    polygon_pct = lines[0].get("bead_polygon_pct", [])
+    if not polygon_pct:
+        return {"z1": None, "z2": None, "isUnequal": False}
+
+    xs = [p["x_pct"] for p in polygon_pct]
+    ys = [p["y_pct"] for p in polygon_pct]
+
+    root_y = max(ys)
+    root_x = xs[ys.index(root_y)]
+
+    horizontal_toe_x = min(xs)
+    z2_pct = abs(horizontal_toe_x - root_x)
+    vertical_toe_y = min(ys)
+    z1_pct = abs(root_y - vertical_toe_y)
+
+    z1_mm = round(z1_pct * ppm / 100, 2) if ppm > 0 else None
+    z2_mm = round(z2_pct * ppm / 100, 2) if ppm > 0 else None
+
+    is_unequal = False
+    if z1_mm and z2_mm:
+        is_unequal = abs(z1_mm - z2_mm) > 1.5
+
+    return {
+        "z1": z1_mm,
+        "z2": z2_mm,
+        "difference": round(abs((z1_mm or 0) - (z2_mm or 0)), 2),
+        "isUnequal": is_unequal,
+        "note": "Roboflow 정확도에 따라 오차 있을 수 있음",
+    }
+
+
+def calculate_fillet_analysis(vision_data: dict, ppm: float, is_fillet: bool):
+    if not is_fillet:
+        return None
+    W = vision_data.get("bead_width_max", 0)
+    if W <= 0:
+        return None
+
+    equal_leg          = round(W * 0.7071, 2)
+    theoretical_throat = round(W / 2, 2)
+    unequal_leg        = calculate_unequal_legs(vision_data, ppm)
+    convexity          = calculate_convexity(vision_data)
+    actual_throat      = round(theoretical_throat + convexity.get("value_mm", 0), 2)
+
+    return {
+        "beadWidth":         W,
+        "equalLeg":          equal_leg,
+        "theoreticalThroat": theoretical_throat,
+        "actualThroat":      actual_throat,
+        "unequalLeg":        unequal_leg,
+        "convexity":         convexity,
+        "note":              "부등각장은 Roboflow 정확도에 따라 오차 있을 수 있음",
+    }
+
+
 @app.post("/analyze-welding")
 async def analyze_welding_full(
     file:           UploadFile           = File(...),
@@ -519,6 +593,9 @@ async def analyze_welding_full(
     plate_thickness: str = Form(""),
     pipe_outer_diameter_mm: str = Form(""),
     language: str = Form("ko"),
+    is_fillet: str = Form("false"),
+    has_laser: str = Form("false"),
+    laser_angle_deg: str = Form("45"),
 ):
     # Map language code → human-readable name for the AI prompt
     LANG_NAMES_FOR_AI = {
@@ -528,6 +605,7 @@ async def analyze_welding_full(
     language_name = LANG_NAMES_FOR_AI.get(language, "Korean")
     print(f"[Lang] AI report language: {language} → {language_name}")
 
+    is_fillet_bool = is_fillet.lower() == "true"
     is_pipe = "배관" in material
     try:
         pipe_od_mm = float(pipe_outer_diameter_mm) if pipe_outer_diameter_mm else 0.0
@@ -548,6 +626,8 @@ async def analyze_welding_full(
     front_preds = front_robo.get("predictions", [])
     vision_data = analyze_bead_dimensions(front_preds, is_pipe=is_pipe,
                                           pipe_outer_diameter_mm=pipe_od_mm)
+
+    fillet_result = calculate_fillet_analysis(vision_data, vision_data.get("ppm", 1), is_fillet_bool)
 
     # 마커/비드 미탐지 시 분석 중단 — 잘못된 사진(풍경·인물·흐릿) 또는
     # 마커 누락 사진을 가짜 기본값으로 분석해 항상 같은 점수를 내는 문제 방지
@@ -877,4 +957,6 @@ async def analyze_welding_full(
         },
         # welding_calculator 원시 출력
         "weldScore": weld_data,
+        # 필렛 분석 (is_fillet=true 일 때만 non-null)
+        "filletAnalysis": fillet_result,
     }
