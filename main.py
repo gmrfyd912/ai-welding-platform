@@ -625,8 +625,14 @@ async def analyze_welding_full(
     # Roboflow 가 Reference_Marker 못 잡았으면 OpenCV ArUco 검출값으로 폴백 주입
     front_robo  = _inject_marker_fallback(front_robo, front_aruco, "front")
     front_preds = front_robo.get("predictions", [])
-    vision_data = analyze_bead_dimensions(front_preds, is_pipe=is_pipe,
-                                          pipe_outer_diameter_mm=pipe_od_mm)
+    vision_data = analyze_bead_dimensions(
+        front_preds,
+        is_pipe=is_pipe,
+        pipe_outer_diameter_mm=pipe_od_mm,
+        has_laser=has_laser.lower() == "true",
+        laser_angle_deg=float(laser_angle_deg) if laser_angle_deg else 45.0,
+        image_bytes=image_bytes_raw,
+    )
 
     fillet_result = calculate_fillet_analysis(vision_data, vision_data.get("ppm", 1), is_fillet_bool)
 
@@ -963,6 +969,7 @@ async def analyze_welding_full(
             "bead_width_min":        vision_data["bead_width_min"],
             "straightness_variance": vision_data["straightness_variance"],
             "side_status":           "ok" if side_vision_data else ("none" if not has_side_photo else "miss"),
+            "laser_analysis":        vision_data.get("laser_analysis"),
         },
         # welding_calculator 원시 출력
         "weldScore": weld_data,

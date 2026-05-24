@@ -74,8 +74,215 @@ def _densify_polygon(pts_xy: np.ndarray, max_seg_len_px: float = 3.0) -> np.ndar
     return np.array(out, dtype=np.float64)
 
 
+def analyze_laser_grid(image_bytes: bytes, ppm: float,
+                       laser_angle_deg: float = 45.0,
+                       bead_polygon_pct: list = None) -> dict:
+    """
+    DOE 격자 레이저 분석으로 비드 높이/오목볼록도 측정.
+
+    원리:
+    - 평탄면: 격자선이 직선
+    - 비드 위: 격자선이 휘어짐
+    - 휘어진 정도 + 레이저 각도 → 실제 높이(mm)
+
+    공식: h = 격자변형량(px) / ppm / tan(laser_angle_deg)
+    """
+    try:
+        # [1단계] 이미지 로드 및 전처리
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return {"status": "error", "message": "이미지 디코딩 실패"}
+
+        h_img, w_img = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+
+        # [2단계] 격자선 검출
+        lines_raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=50,
+                                    minLineLength=30, maxLineGap=10)
+        if lines_raw is None or len(lines_raw) == 0:
+            return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
+
+        h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
+        v_lines = []
+
+        for line in lines_raw:
+            x1, y1, x2, y2 = line[0]
+            length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+            if length < 30:
+                continue
+            angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
+            center_y = (y1 + y2) / 2.0
+            center_x = (x1 + x2) / 2.0
+            if angle <= 15 or angle >= 165:
+                h_lines.append((center_y, center_x, x1, y1, x2, y2, length))
+            elif 75 <= angle <= 105:
+                v_lines.append((center_x, center_y, x1, y1, x2, y2, length))
+
+        if len(h_lines) < 3:
+            return {"status": "error", "message": f"수평 격자선 부족 ({len(h_lines)}개 검출)"}
+
+        # [3단계] 비드 영역 vs 평탄 영역 분리
+        if bead_polygon_pct:
+            xs = [p["x_pct"] * w_img / 100 for p in bead_polygon_pct]
+            ys = [p["y_pct"] * h_img / 100 for p in bead_polygon_pct]
+            bead_y_min = int(min(ys))
+            bead_y_max = int(max(ys))
+            bead_x_min = int(min(xs))
+            bead_x_max = int(max(xs))
+        else:
+            bead_y_min = int(h_img * 0.30)
+            bead_y_max = int(h_img * 0.70)
+            bead_x_min = int(w_img * 0.30)
+            bead_x_max = int(w_img * 0.70)
+
+        bead_center_y = (bead_y_min + bead_y_max) / 2.0
+
+        # [4단계] 기준 격자 간격 계산 (평탄면 기준)
+        flat_ys = sorted([
+            cy for (cy, cx, x1, y1, x2, y2, length) in h_lines
+            if cy < bead_y_min or cy > bead_y_max
+        ])
+        if len(flat_ys) >= 2:
+            spacings = [
+                flat_ys[i + 1] - flat_ys[i]
+                for i in range(len(flat_ys) - 1)
+                if flat_ys[i + 1] - flat_ys[i] > 5
+            ]
+            ref_spacing_px = float(np.median(spacings)) if spacings else 20.0
+        else:
+            ref_spacing_px = 20.0
+
+        laser_grid_spacing_mm = round(ref_spacing_px / ppm, 2)
+
+        # [5단계] 비드 위 격자 변형량 측정
+        bead_h_lines = [
+            (cy, cx, x1, y1, x2, y2, length)
+            for (cy, cx, x1, y1, x2, y2, length) in h_lines
+            if bead_y_min <= cy <= bead_y_max
+        ]
+
+        n_segments = 10
+        x_range = max(bead_x_max - bead_x_min, 1)
+        tan_angle = max(math.tan(math.radians(laser_angle_deg)), 1e-9)
+
+        # 비드 중앙 y에 대한 예상 격자선 y (평탄면 기준 보간)
+        above_ys = [cy for cy in flat_ys if cy < bead_y_min]
+        below_ys = [cy for cy in flat_ys if cy > bead_y_max]
+        if above_ys and below_ys:
+            n_steps = round((bead_center_y - above_ys[-1]) / ref_spacing_px)
+            expected_center_y = above_ys[-1] + n_steps * ref_spacing_px
+        elif above_ys:
+            n_steps = round((bead_center_y - above_ys[-1]) / ref_spacing_px)
+            expected_center_y = above_ys[-1] + n_steps * ref_spacing_px
+        elif below_ys:
+            n_steps = round((below_ys[0] - bead_center_y) / ref_spacing_px)
+            expected_center_y = below_ys[0] - n_steps * ref_spacing_px
+        else:
+            expected_center_y = bead_center_y
+
+        profile = []
+        heights_mm = []
+
+        for i in range(n_segments):
+            x_lo = bead_x_min + i * x_range / n_segments
+            x_hi = bead_x_min + (i + 1) * x_range / n_segments
+            x_center = (x_lo + x_hi) / 2.0
+            x_pct = round(x_center / w_img * 100, 2)
+
+            # 이 x 구간에서 비드 위 수평선의 실제 y
+            seg_ys = []
+            for (cy, cx, x1, y1, x2, y2, length) in bead_h_lines:
+                lx_min = min(x1, x2)
+                lx_max = max(x1, x2)
+                if lx_max >= x_lo and lx_min <= x_hi:
+                    if x2 != x1:
+                        t = max(0.0, min(1.0, (x_center - x1) / (x2 - x1)))
+                        y_interp = y1 + t * (y2 - y1)
+                    else:
+                        y_interp = (y1 + y2) / 2.0
+                    seg_ys.append(y_interp)
+
+            if not seg_ys:
+                continue
+
+            actual_y = float(np.median(seg_ys))
+            # [6단계] 양수 = 위로 휨 = 볼록 (비드 솟아오름)
+            deformation_px = expected_center_y - actual_y
+            height_mm = round(deformation_px / ppm / tan_angle, 2)
+            heights_mm.append(height_mm)
+            profile.append({"x_pct": x_pct, "height_mm": height_mm})
+
+        if not heights_mm:
+            return {"status": "error", "message": "비드 위 격자 변형을 측정하지 못했습니다"}
+
+        # [7단계] 프로파일 통계
+        arr = np.array(heights_mm, dtype=np.float64)
+        max_h = round(float(arr.max()), 2)
+        min_h = round(float(arr.min()), 2)
+        avg_h = round(float(arr.mean()), 2)
+        variance = round(float(max_h - min_h), 2)
+
+        if avg_h > 0.5:
+            convexity = "convex"
+        elif avg_h < -0.5:
+            convexity = "concave"
+        else:
+            convexity = "flat"
+
+        # [8단계] 격자선 시각화 데이터
+        grid_lines_vis = []
+        for (cy, cx, x1, y1, x2, y2, length) in h_lines[:20]:
+            grid_lines_vis.append({
+                "x1_pct": round(x1 / w_img * 100, 2),
+                "y1_pct": round(y1 / h_img * 100, 2),
+                "x2_pct": round(x2 / w_img * 100, 2),
+                "y2_pct": round(y2 / h_img * 100, 2),
+                "type": "horizontal",
+            })
+        for (cx, cy, x1, y1, x2, y2, length) in v_lines[:10]:
+            grid_lines_vis.append({
+                "x1_pct": round(x1 / w_img * 100, 2),
+                "y1_pct": round(y1 / h_img * 100, 2),
+                "x2_pct": round(x2 / w_img * 100, 2),
+                "y2_pct": round(y2 / h_img * 100, 2),
+                "type": "vertical",
+            })
+
+        worst_idx = int(np.argmax(np.abs(arr)))
+        worst_pt = profile[worst_idx] if worst_idx < len(profile) else None
+
+        return {
+            "status": "success",
+            "beadHeightMax": max_h,
+            "beadHeightMin": min_h,
+            "beadHeightAvg": avg_h,
+            "heightVariance": variance,
+            "convexity": convexity,
+            "convexityMm": round(abs(avg_h), 2),
+            "laserGridSpacingMm": laser_grid_spacing_mm,
+            "profile": profile,
+            "gridLines": grid_lines_vis,
+            "worstPoint": {
+                "x_pct": worst_pt["x_pct"],
+                "y_pct": round(bead_center_y / h_img * 100, 2),
+                "height_mm": heights_mm[worst_idx],
+            } if worst_pt else None,
+            "message": (f"격자 간격 {laser_grid_spacing_mm}mm | "
+                        f"수평선 {len(h_lines)}개 검출"),
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"레이저 격자 분석 오류: {str(e)}"}
+
+
 def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False,
-                            pipe_outer_diameter_mm: float = 0.0):
+                            pipe_outer_diameter_mm: float = 0.0,
+                            has_laser: bool = False,
+                            laser_angle_deg: float = 45.0,
+                            image_bytes: bytes = None):
     """
     비드 폭 / 직진도 분석.
 
@@ -455,6 +662,17 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
     if not bead_widths_mm:
         return {"status": "error", "message": "사진에서 용접 비드(Weld_Bead)를 인식하지 못했습니다."}
 
+    bead_polygon_pct = straightness_lines[0].get("bead_polygon_pct") if straightness_lines else None
+    if has_laser and image_bytes:
+        laser_result = analyze_laser_grid(
+            image_bytes=image_bytes,
+            ppm=ppm,
+            laser_angle_deg=laser_angle_deg,
+            bead_polygon_pct=bead_polygon_pct,
+        )
+    else:
+        laser_result = None
+
     return {
         "status": "success",
         "ppm": round(float(ppm), 2),
@@ -464,4 +682,5 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
         "straightness_lines": straightness_lines,
         "defects_info": defects_info,
         "is_pipe": bool(is_pipe),
+        "laser_analysis": laser_result,
     }
