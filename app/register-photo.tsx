@@ -119,7 +119,7 @@ export default function RegisterPhotoScreen() {
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
-  const [analysisMode, setAnalysisMode] = useState<"quick" | "ai">("ai");
+  const [analysisMode, setAnalysisMode] = useState<"quick" | "ai">("quick");
 
   const selfScoreNum = parseInt(selfScore) || 0;
 
@@ -607,47 +607,48 @@ export default function RegisterPhotoScreen() {
             AI 분석 결과와 비교하여 자기 평가 정확도를 확인할 수 있습니다
           </Text>
         </View>
+
+        {/* 분석 모드 + AI 모델 선택 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>분석 모드</Text>
+          <View style={styles.modeSelector}>
+            <Pressable
+              style={[styles.modeOption, analysisMode === "quick" && styles.modeOptionActive]}
+              onPress={() => { setAnalysisMode("quick"); Haptics.selectionAsync(); }}
+            >
+              <Ionicons name="flash-outline" size={14} color={analysisMode === "quick" ? Colors.primary : Colors.textMuted} />
+              <Text style={[styles.modeOptionText, analysisMode === "quick" && styles.modeOptionTextActive]}>빠른 측정</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modeOption, analysisMode === "ai" && styles.modeOptionActive]}
+              onPress={() => { setAnalysisMode("ai"); Haptics.selectionAsync(); }}
+            >
+              <MaterialCommunityIcons name="robot-outline" size={14} color={analysisMode === "ai" ? Colors.primary : Colors.textMuted} />
+              <Text style={[styles.modeOptionText, analysisMode === "ai" && styles.modeOptionTextActive]}>AI 종합 분석</Text>
+            </Pressable>
+          </View>
+          {analysisMode === "ai" && (
+            <View style={styles.aiSelector}>
+              <Pressable
+                style={[styles.aiOption, selectedAI === "gpt-4o" && styles.aiOptionActive]}
+                onPress={() => setSelectedAI("gpt-4o")}
+              >
+                <Text style={[styles.aiOptionText, selectedAI === "gpt-4o" && styles.aiOptionTextActive]}>GPT-4o</Text>
+                <Text style={[styles.aiOptionSub, selectedAI === "gpt-4o" && styles.aiOptionSubActive]}>OpenAI</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.aiOption, selectedAI === "claude-sonnet" && styles.aiOptionActive]}
+                onPress={() => setSelectedAI("claude-sonnet")}
+              >
+                <Text style={[styles.aiOptionText, selectedAI === "claude-sonnet" && styles.aiOptionTextActive]}>Claude Sonnet</Text>
+                <Text style={[styles.aiOptionSub, selectedAI === "claude-sonnet" && styles.aiOptionSubActive]}>Anthropic</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
       </KeyboardAwareScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        {/* 1단계: 분석 모드 선택 */}
-        <View style={styles.modeSelector}>
-          <Pressable
-            style={[styles.modeOption, analysisMode === "quick" && styles.modeOptionActive]}
-            onPress={() => { setAnalysisMode("quick"); Haptics.selectionAsync(); }}
-          >
-            <Ionicons name="flash-outline" size={14} color={analysisMode === "quick" ? Colors.primary : Colors.textMuted} />
-            <Text style={[styles.modeOptionText, analysisMode === "quick" && styles.modeOptionTextActive]}>빠른 측정</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.modeOption, analysisMode === "ai" && styles.modeOptionActive]}
-            onPress={() => { setAnalysisMode("ai"); Haptics.selectionAsync(); }}
-          >
-            <MaterialCommunityIcons name="robot-outline" size={14} color={analysisMode === "ai" ? Colors.primary : Colors.textMuted} />
-            <Text style={[styles.modeOptionText, analysisMode === "ai" && styles.modeOptionTextActive]}>AI 종합 분석</Text>
-          </Pressable>
-        </View>
-
-        {/* 2단계: AI 모델 선택 (AI 종합 분석 선택 시에만 표시) */}
-        {analysisMode === "ai" && (
-          <View style={styles.aiSelector}>
-            <Pressable
-              style={[styles.aiOption, selectedAI === "gpt-4o" && styles.aiOptionActive]}
-              onPress={() => setSelectedAI("gpt-4o")}
-            >
-              <Text style={[styles.aiOptionText, selectedAI === "gpt-4o" && styles.aiOptionTextActive]}>GPT-4o</Text>
-              <Text style={[styles.aiOptionSub, selectedAI === "gpt-4o" && styles.aiOptionSubActive]}>OpenAI</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.aiOption, selectedAI === "claude-sonnet" && styles.aiOptionActive]}
-              onPress={() => setSelectedAI("claude-sonnet")}
-            >
-              <Text style={[styles.aiOptionText, selectedAI === "claude-sonnet" && styles.aiOptionTextActive]}>Claude Sonnet</Text>
-              <Text style={[styles.aiOptionSub, selectedAI === "claude-sonnet" && styles.aiOptionSubActive]}>Anthropic</Text>
-            </Pressable>
-          </View>
-        )}
-
         <Pressable
           style={({ pressed }) => [styles.submitBtn, pressed && { opacity: 0.85 }, isAnalyzing && { opacity: 0.6 }]}
           onPress={handleSubmit}
@@ -947,7 +948,6 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
-    gap: 8,
     backgroundColor: Colors.bg + "EE",
     borderTopWidth: 1,
     borderTopColor: Colors.border,
