@@ -23,7 +23,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Polyline, Line, Circle, Text as SvgText } from "react-native-svg";
 import Colors, { getGrade, getGradeColor } from "@/constants/colors";
-import { useWelding, DefectItem, PerPhotoAnalysis } from "@/context/WeldingContext";
+import { useWelding, DefectItem, PerPhotoAnalysis, FilletAnalysis } from "@/context/WeldingContext";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import CommentsSection from "@/components/CommentsSection";
@@ -958,6 +958,55 @@ export default function DiagnosisScreen() {
           )}
         </SectionCard>
 
+        {result.filletAnalysis && (() => {
+          const fa = result.filletAnalysis as FilletAnalysis;
+          const convexColor =
+            fa.convexity.type === "convex" ? Colors.warning
+            : fa.convexity.type === "concave" ? Colors.danger
+            : Colors.textSecondary;
+          const convexLabel =
+            fa.convexity.type === "convex" ? "볼록"
+            : fa.convexity.type === "concave" ? "오목"
+            : "평탄";
+          return (
+            <SectionCard title="필렛 용접 분석" icon="triangle-outline">
+              {([
+                ["비드 너비", `${fa.beadWidth}mm`],
+                ["등각장(Z)", `${fa.equalLeg}mm`],
+                ["수직 각장(Z1)", fa.unequalLeg.z1 != null ? `${fa.unequalLeg.z1}mm` : "-"],
+                ["수평 각장(Z2)", fa.unequalLeg.z2 != null ? `${fa.unequalLeg.z2}mm` : "-"],
+                ["이론 목두께", `${fa.theoreticalThroat}mm`],
+                ["실제 목두께", `${fa.actualThroat}mm`],
+              ] as [string, string][]).map(([label, value]) => (
+                <View key={label} style={styles.filletRow}>
+                  <Text style={styles.filletLabel}>{label}</Text>
+                  <Text style={styles.filletValue}>{value}</Text>
+                </View>
+              ))}
+              <View style={styles.filletRow}>
+                <Text style={styles.filletLabel}>부등각장</Text>
+                {fa.unequalLeg.isUnequal ? (
+                  <View style={styles.filletWarnBadge}>
+                    <MaterialCommunityIcons name="alert" size={12} color={Colors.warning} />
+                    <Text style={styles.filletWarnText}>
+                      차이 {fa.unequalLeg.difference ?? "?"}mm
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.filletValue, { color: Colors.success }]}>균등</Text>
+                )}
+              </View>
+              <View style={styles.filletRow}>
+                <Text style={styles.filletLabel}>비드 형상</Text>
+                <Text style={[styles.filletValue, { color: convexColor }]}>
+                  {convexLabel} ({fa.convexity.value_mm}mm)
+                </Text>
+              </View>
+              <Text style={styles.filletNote}>※ 부등각장은 참고용 측정값 (비드 폴리곤 기반)</Text>
+            </SectionCard>
+          );
+        })()}
+
         <SectionCard
           title={t("diag_defectEval")}
           icon="magnify-scan"
@@ -1811,6 +1860,47 @@ const styles = StyleSheet.create({
   historyScore: { alignItems: "flex-end" },
   historyScoreNum: { fontFamily: "Inter_700Bold", fontSize: 20 },
   historyGrade: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11 },
+  filletRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  filletLabel: {
+    color: Colors.textMuted,
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+  },
+  filletValue: {
+    color: Colors.text,
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 13,
+  },
+  filletWarnBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.warning + "22",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: Colors.warning + "44",
+  },
+  filletWarnText: {
+    color: Colors.warning,
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 12,
+  },
+  filletNote: {
+    color: Colors.textMuted,
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    fontStyle: "italic",
+    marginTop: 4,
+  },
   sectionPhotoThumb: {
     width: "100%",
     height: 140,

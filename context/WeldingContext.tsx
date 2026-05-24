@@ -62,6 +62,28 @@ export interface BeadAnalysis {
   height?: BeadMetric | null;
 }
 
+export interface FilletConvexity {
+  type: string;
+  value_mm: number;
+}
+
+export interface FilletUnequalLeg {
+  z1: number | null;
+  z2: number | null;
+  isUnequal: boolean;
+  difference?: number;
+}
+
+export interface FilletAnalysis {
+  beadWidth: number;
+  equalLeg: number;
+  theoreticalThroat: number;
+  actualThroat: number;
+  unequalLeg: FilletUnequalLeg;
+  convexity: FilletConvexity;
+  note?: string;
+}
+
 export interface DefectLocation {
   name: string;
   x: number;
@@ -125,6 +147,7 @@ export interface WeldingResult {
   overallVerdict: "PASS" | "FAIL";
   top3Defects: string[];
   trendScores: number[];
+  filletAnalysis?: FilletAnalysis | null;
 }
 
 interface WeldingContextValue {
