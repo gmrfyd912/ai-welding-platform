@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import { useWelding, WeldProcess, WeldPosture, WeldMaterial } from "@/context/We
 import { getApiUrl } from "@/lib/query-client";
 import { useLanguage } from "@/context/LanguageContext";
 import WeldCameraModal from "@/components/WeldCameraModal";
+import { DeviceMotion } from "expo-sensors";
 
 const SCREEN_W = Dimensions.get("window").width;
 const PHOTO_W = SCREEN_W - 40;
@@ -117,8 +118,34 @@ export default function RegisterPhotoScreen() {
   const [analysisStage, setAnalysisStage] = useState<string>("");
   const [selectedAI, setSelectedAI] = useState<"gpt-4o" | "claude-sonnet">("gpt-4o");
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
+  const [isFillet, setIsFillet] = useState(false);
+  const [hasLaser, setHasLaser] = useState(false);
+  const [laserAngleDeg, setLaserAngleDeg] = useState(45);
+  const [deviceAngle, setDeviceAngle] = useState<number | null>(null);
 
   const selfScoreNum = parseInt(selfScore) || 0;
+
+  const targetAngle = hasLaser ? laserAngleDeg : 90;
+  const angleOk = deviceAngle !== null && Math.abs(deviceAngle - targetAngle) <= 3;
+
+  useEffect(() => {
+    DeviceMotion.setUpdateInterval(200);
+    const sub = DeviceMotion.addListener((data) => {
+      if (data.rotation) {
+        const betaDeg = Math.abs((data.rotation.beta * 180) / Math.PI);
+        const gammaDeg = Math.abs((data.rotation.gamma * 180) / Math.PI);
+        setDeviceAngle(Math.round(Math.max(betaDeg, gammaDeg)));
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  const handlePostureSelect = (p: WeldPosture) => {
+    setPosture(p);
+    if (["1F", "2F", "3F", "4F", "5F"].includes(p)) setIsFillet(true);
+    else if (["1G", "2G", "3G", "4G", "5G", "6G"].includes(p)) setIsFillet(false);
+    Haptics.selectionAsync();
+  };
 
   const pickPhoto = async (slot: PhotoSlot, source: "gallery" | "camera") => {
     if (source === "camera") {
@@ -238,6 +265,9 @@ export default function RegisterPhotoScreen() {
           pipeOuterDiameterMm: material.includes("배관") ? (pipeOuterDiameter.trim() || undefined) : undefined,
           language: lang,
           aiModel: selectedAI,
+          isFillet,
+          hasLaser,
+          laserAngleDeg,
         }),
       });
 
@@ -393,6 +423,47 @@ export default function RegisterPhotoScreen() {
           </View>
         </View>
 
+        {/* 레이저 모드 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>레이저 보조</Text>
+          <View style={styles.laserToggleRow}>
+            {([false, true] as const).map((val) => (
+              <Pressable
+                key={String(val)}
+                style={[styles.laserOption, hasLaser === val && styles.laserOptionActive]}
+                onPress={() => { setHasLaser(val); Haptics.selectionAsync(); }}
+              >
+                <Ionicons
+                  name={val ? "flashlight" : "flashlight-outline"}
+                  size={15}
+                  color={hasLaser === val ? Colors.primary : Colors.textMuted}
+                />
+                <Text style={[styles.laserOptionText, hasLaser === val && styles.laserOptionTextActive]}>
+                  {val ? "레이저 있음" : "레이저 없음"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          {hasLaser && (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.laserAngleLabel}>레이저 각도</Text>
+              <View style={chipStyles.container}>
+                {[30, 45, 60].map((deg) => (
+                  <Pressable
+                    key={deg}
+                    style={[chipStyles.chip, laserAngleDeg === deg && chipStyles.chipActive]}
+                    onPress={() => { setLaserAngleDeg(deg); Haptics.selectionAsync(); }}
+                  >
+                    <Text style={[chipStyles.chipText, laserAngleDeg === deg && chipStyles.chipTextActive]}>
+                      {deg}°
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+
         <View style={styles.section}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={styles.sectionTitle}>{t("reg_photoSection")}</Text>
@@ -472,7 +543,7 @@ export default function RegisterPhotoScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("photo_weldPosture")}</Text>
-          <ChipSelect options={POSTURES} selected={posture} onSelect={setPosture} />
+          <ChipSelect options={POSTURES} selected={posture} onSelect={handlePostureSelect} />
           {posture === "기타" && (
             <TextInput
               style={styles.customInput}
@@ -482,6 +553,19 @@ export default function RegisterPhotoScreen() {
               onChangeText={setPostureCustom}
             />
           )}
+          <Pressable
+            style={styles.filletRow}
+            onPress={() => { setIsFillet(v => !v); Haptics.selectionAsync(); }}
+          >
+            <Ionicons
+              name={isFillet ? "checkbox" : "square-outline"}
+              size={20}
+              color={isFillet ? Colors.primary : Colors.textMuted}
+            />
+            <Text style={[styles.filletLabel, isFillet && { color: Colors.primary }]}>
+              필렛(Fillet) 용접
+            </Text>
+          </Pressable>
         </View>
 
         <View style={styles.section}>
@@ -558,6 +642,25 @@ export default function RegisterPhotoScreen() {
       </KeyboardAwareScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        {/* 자이로 각도 가이드 */}
+        <View style={[styles.gyroRow, angleOk && styles.gyroRowOk]}>
+          <Ionicons
+            name="compass-outline"
+            size={16}
+            color={angleOk ? "#10b981" : Colors.textMuted}
+          />
+          <Text style={[styles.gyroText, angleOk && styles.gyroTextOk]}>
+            {deviceAngle !== null
+              ? `현재 ${deviceAngle}° / 목표 ${targetAngle}°${angleOk ? " ✓" : ""}`
+              : "센서 초기화 중..."}
+          </Text>
+          {deviceAngle !== null && (
+            <Text style={[styles.gyroDiff, angleOk && styles.gyroTextOk]}>
+              {angleOk ? "±3° 이내" : `편차 ${Math.abs(deviceAngle - targetAngle)}°`}
+            </Text>
+          )}
+        </View>
+
         {/* AI 모델 선택기 */}
         <View style={styles.aiSelector}>
           <Pressable
@@ -1044,4 +1147,43 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     fontSize: 15,
   },
+
+  // 필렛
+  filletRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 8, paddingHorizontal: 4,
+  },
+  filletLabel: {
+    color: Colors.textSecondary,
+    fontFamily: "Inter_500Medium",
+    fontSize: 14,
+  },
+
+  // 레이저
+  laserToggleRow: { flexDirection: "row", gap: 10 },
+  laserOption: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 10, borderRadius: 10,
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  laserOptionActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + "18",
+  },
+  laserOptionText: { color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 13 },
+  laserOptionTextActive: { color: Colors.primary },
+  laserAngleLabel: { color: Colors.textSecondary, fontFamily: "Inter_500Medium", fontSize: 13 },
+
+  // 자이로
+  gyroRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: Colors.surface, borderRadius: 10,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10,
+  },
+  gyroRowOk: { borderColor: "#10b981", backgroundColor: "#10b98118" },
+  gyroText: { flex: 1, color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 13 },
+  gyroTextOk: { color: "#10b981" },
+  gyroDiff: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12 },
 });
