@@ -19,27 +19,30 @@ import { useLanguage } from "@/context/LanguageContext";
 interface Props {
   visible: boolean;
   onClose: () => void;
-  onCapture: (uri: string) => void;
-  targetAngle?: number;
+  onCapture: (uri: string, laserAngleDeg?: number) => void;
+  hasLaser: boolean;
 }
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-const GAUGE_H = SCREEN_H * 0.48;
+const GAUGE_H = SCREEN_H * 0.42;
 const GAUGE_W = 28;
 const GAUGE_MIN = 0;
 const GAUGE_MAX = 90;
+const ANGLE_OPTIONS = [30, 45, 60] as const;
+type AngleOption = typeof ANGLE_OPTIONS[number];
 
-export default function WeldCameraModal({ visible, onClose, onCapture, targetAngle = 90 }: Props) {
+export default function WeldCameraModal({ visible, onClose, onCapture, hasLaser }: Props) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [isTaking, setIsTaking] = useState(false);
-  const [currentAngle, setCurrentAngle] = useState(90);
+  const [currentAngle, setCurrentAngle] = useState(45);
+  const [selectedAngle, setSelectedAngle] = useState<AngleOption>(45);
 
   useEffect(() => {
-    if (!visible || Platform.OS === "web") return;
+    if (!visible || !hasLaser || Platform.OS === "web") return;
     DeviceMotion.setUpdateInterval(150);
     const sub = DeviceMotion.addListener((data) => {
       const { beta = 0, gamma = 0 } = data.rotation ?? {};
@@ -48,7 +51,7 @@ export default function WeldCameraModal({ visible, onClose, onCapture, targetAng
       setCurrentAngle(Math.round(Math.max(betaDeg, gammaDeg)));
     });
     return () => sub.remove();
-  }, [visible]);
+  }, [visible, hasLaser]);
 
   const handleCapture = useCallback(async () => {
     if (!cameraRef.current || isTaking) return;
@@ -58,26 +61,21 @@ export default function WeldCameraModal({ visible, onClose, onCapture, targetAng
         quality: 0.85,
         skipProcessing: false,
       });
-      if (photo?.uri) onCapture(photo.uri);
+      if (photo?.uri) onCapture(photo.uri, hasLaser ? selectedAngle : undefined);
     } catch (e) {
       console.warn("촬영 실패:", e);
     } finally {
       setIsTaking(false);
     }
-  }, [isTaking, onCapture]);
+  }, [isTaking, onCapture, hasLaser, selectedAngle]);
 
-  const angleOk = Math.abs(currentAngle - targetAngle) <= 3;
+  const angleOk = hasLaser && Math.abs(currentAngle - selectedAngle) <= 3;
   const badgeColor = angleOk ? Colors.success : Colors.warning;
 
-  // 게이지 상 현재 위치 (0°=하단, 90°=상단)
-  const clampedAngle = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, currentAngle));
-  const clampedTarget = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, targetAngle));
   const angleToY = (deg: number) =>
-    GAUGE_H - ((deg - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * GAUGE_H;
-  const needleY = angleToY(clampedAngle);
-  const targetY = angleToY(clampedTarget);
-
-  // 허용 오차 ±3° 범위의 게이지 높이
+    GAUGE_H - ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, deg)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * GAUGE_H;
+  const needleY = angleToY(currentAngle);
+  const targetY = angleToY(selectedAngle);
   const tolerancePx = (3 / (GAUGE_MAX - GAUGE_MIN)) * GAUGE_H;
 
   const renderContent = () => {
@@ -114,99 +112,121 @@ export default function WeldCameraModal({ visible, onClose, onCapture, targetAng
     return (
       <>
         {/* 카메라 프리뷰 */}
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing="back"
-        />
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
 
         {/* ── 상단 안내 텍스트 ── */}
-        <View style={[styles.instructionBox, { top: insets.top + 16 }]}>
+        <View style={[styles.instructionBox, { top: insets.top + 12 }]}>
           <Text style={styles.instructionText}>
             비드와 아루코마커가 프레임 안에 들어오도록 촬영하세요
           </Text>
         </View>
 
-        {/* ── 상단 중앙 각도 뱃지 ── */}
-        <View style={[styles.angleBadge, { top: insets.top + 60, borderColor: badgeColor + "88", backgroundColor: badgeColor + "22" }]}>
-          <Ionicons
-            name={angleOk ? "checkmark-circle" : "alert-circle-outline"}
-            size={14}
-            color={badgeColor}
-          />
-          <Text style={[styles.angleBadgeText, { color: badgeColor }]}>
-            {currentAngle}° / {targetAngle}°
-          </Text>
-          <Text style={[styles.angleBadgeSubText, { color: badgeColor }]}>
-            {angleOk ? "적정 각도" : `${Math.abs(currentAngle - targetAngle)}° 차이`}
-          </Text>
-        </View>
-
-        {/* ── 우측 세로 각도 게이지 ── */}
-        <View style={[styles.gaugeContainer, { top: (SCREEN_H - GAUGE_H) / 2, right: 16 }]}>
-          {/* 배경 트랙 */}
-          <View style={styles.gaugeTrack} />
-
-          {/* ±3° 허용 오차 초록 구간 */}
-          <View
-            style={[
-              styles.gaugeOkZone,
-              {
-                top: Math.max(0, targetY - tolerancePx),
-                height: tolerancePx * 2,
-              },
-            ]}
-          />
-
-          {/* 목표 각도 선 */}
-          <View style={[styles.gaugeTargetLine, { top: targetY }]} />
-
-          {/* 목표 각도 라벨 */}
-          <Text style={[styles.gaugeTargetLabel, { top: targetY - 16 }]}>
-            {targetAngle}°
-          </Text>
-
-          {/* 현재 각도 바늘 */}
-          <View
-            style={[
-              styles.gaugeNeedle,
-              {
-                top: needleY - 8,
-                backgroundColor: badgeColor,
-                borderColor: badgeColor,
-              },
-            ]}
-          />
-
-          {/* 눈금 텍스트 (0, 45, 90) */}
-          {[0, 45, 90].map((deg) => (
-            <Text
-              key={deg}
-              style={[styles.gaugeTick, { top: angleToY(deg) - 7 }]}
+        {/* ── 레이저 있을 때만: 각도 뱃지 + 게이지 ── */}
+        {hasLaser && (
+          <>
+            {/* 각도 상태 뱃지 */}
+            <View
+              style={[
+                styles.angleBadge,
+                {
+                  top: insets.top + 56,
+                  borderColor: badgeColor + "88",
+                  backgroundColor: badgeColor + "22",
+                },
+              ]}
             >
-              {deg}°
-            </Text>
-          ))}
-        </View>
+              <Ionicons
+                name={angleOk ? "checkmark-circle" : "alert-circle-outline"}
+                size={14}
+                color={badgeColor}
+              />
+              <Text style={[styles.angleBadgeText, { color: badgeColor }]}>
+                {angleOk
+                  ? `✓ ${currentAngle}° 각도 맞음`
+                  : `현재 ${currentAngle}° → 목표 ${selectedAngle}°`}
+              </Text>
+            </View>
 
-        {/* ── 하단: 닫기 + 촬영 버튼 ── */}
+            {/* 우측 세로 각도 게이지 */}
+            <View style={[styles.gaugeContainer, { top: (SCREEN_H - GAUGE_H) / 2, right: 14 }]}>
+              <View style={styles.gaugeTrack} />
+              <View
+                style={[
+                  styles.gaugeOkZone,
+                  { top: Math.max(0, targetY - tolerancePx), height: tolerancePx * 2 },
+                ]}
+              />
+              <View style={[styles.gaugeTargetLine, { top: targetY }]} />
+              <Text style={[styles.gaugeTargetLabel, { top: targetY - 16 }]}>
+                {selectedAngle}°
+              </Text>
+              <View
+                style={[
+                  styles.gaugeNeedle,
+                  { top: needleY - 8, backgroundColor: badgeColor, borderColor: badgeColor },
+                ]}
+              />
+              {[0, 45, 90].map((deg) => (
+                <Text key={deg} style={[styles.gaugeTick, { top: angleToY(deg) - 7 }]}>
+                  {deg}°
+                </Text>
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* ── 하단: 각도 선택(레이저 시) + 닫기 + 촬영 버튼 ── */}
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 20 }]}>
-          <Pressable onPress={onClose} style={styles.sideBtn} hitSlop={12}>
-            <Ionicons name="close" size={30} color="#fff" />
-          </Pressable>
+          {/* 레이저 각도 선택 탭 */}
+          {hasLaser && (
+            <View style={styles.angleTabRow}>
+              {ANGLE_OPTIONS.map((deg) => {
+                const active = selectedAngle === deg;
+                const thisOk = active && angleOk;
+                return (
+                  <Pressable
+                    key={deg}
+                    style={[
+                      styles.angleTab,
+                      active && styles.angleTabActive,
+                      thisOk && styles.angleTabOk,
+                    ]}
+                    onPress={() => setSelectedAngle(deg)}
+                  >
+                    <Text
+                      style={[
+                        styles.angleTabText,
+                        active && styles.angleTabTextActive,
+                        thisOk && styles.angleTabTextOk,
+                      ]}
+                    >
+                      {deg}°
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
 
-          <Pressable
-            onPress={handleCapture}
-            disabled={isTaking}
-            style={({ pressed }) => [styles.captureBtn, pressed && { opacity: 0.8 }]}
-          >
-            {isTaking
-              ? <ActivityIndicator color="#000" size="small" />
-              : <View style={styles.captureBtnInner} />
-            }
-          </Pressable>
+          {/* 닫기 + 촬영 */}
+          <View style={styles.captureRow}>
+            <Pressable onPress={onClose} style={styles.sideBtn} hitSlop={12}>
+              <Ionicons name="close" size={30} color="#fff" />
+            </Pressable>
 
-          <View style={styles.sideBtn} />
+            <Pressable
+              onPress={handleCapture}
+              disabled={isTaking}
+              style={({ pressed }) => [styles.captureBtn, pressed && { opacity: 0.8 }]}
+            >
+              {isTaking
+                ? <ActivityIndicator color="#000" size="small" />
+                : <View style={styles.captureBtnInner} />
+              }
+            </Pressable>
+
+            <View style={styles.sideBtn} />
+          </View>
         </View>
       </>
     );
@@ -214,18 +234,13 @@ export default function WeldCameraModal({ visible, onClose, onCapture, targetAng
 
   return (
     <Modal visible={visible} animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View style={styles.container}>
-        {renderContent()}
-      </View>
+      <View style={styles.container}>{renderContent()}</View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
+  container: { flex: 1, backgroundColor: "#000" },
   center: {
     flex: 1,
     alignItems: "center",
@@ -257,25 +272,20 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     left: 0,
     right: 0,
-    marginHorizontal: 60,
+    marginHorizontal: 50,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
     zIndex: 10,
   },
   angleBadgeText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
-  },
-  angleBadgeSubText: {
-    fontSize: 12,
-    fontWeight: "500",
-    opacity: 0.85,
   },
   gaugeContainer: {
     position: "absolute",
@@ -321,7 +331,6 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 2,
-    backgroundColor: Colors.warning,
   },
   gaugeTick: {
     position: "absolute",
@@ -335,11 +344,53 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    paddingHorizontal: 40,
+    paddingTop: 12,
+    gap: 16,
+    alignItems: "center",
+  },
+  angleTabRow: {
+    flexDirection: "row",
+    gap: 12,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  angleTab: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.3)",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    minWidth: 60,
+    alignItems: "center",
+  },
+  angleTabActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + "33",
+  },
+  angleTabOk: {
+    borderColor: Colors.success,
+    backgroundColor: Colors.success + "33",
+  },
+  angleTabText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  angleTabTextActive: {
+    color: Colors.primary,
+  },
+  angleTabTextOk: {
+    color: Colors.success,
+  },
+  captureRow: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 40,
-    paddingTop: 20,
   },
   sideBtn: {
     width: 44,
@@ -376,17 +427,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
   },
-  permBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  webMsg: {
-    color: "#fff",
-    fontSize: 16,
-    marginBottom: 20,
-    textAlign: "center",
-  },
+  permBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  webMsg: { color: "#fff", fontSize: 16, marginBottom: 20, textAlign: "center" },
   closeWebBtn: {
     backgroundColor: "#fff",
     paddingHorizontal: 24,

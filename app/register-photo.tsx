@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -29,7 +29,6 @@ import { useWelding, WeldProcess, WeldPosture, WeldMaterial } from "@/context/We
 import { getApiUrl } from "@/lib/query-client";
 import { useLanguage } from "@/context/LanguageContext";
 import WeldCameraModal from "@/components/WeldCameraModal";
-import { DeviceMotion } from "expo-sensors";
 
 const SCREEN_W = Dimensions.get("window").width;
 const PHOTO_W = SCREEN_W - 40;
@@ -120,25 +119,8 @@ export default function RegisterPhotoScreen() {
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
-  const [laserAngleDeg, setLaserAngleDeg] = useState(45);
-  const [deviceAngle, setDeviceAngle] = useState<number | null>(null);
 
   const selfScoreNum = parseInt(selfScore) || 0;
-
-  const targetAngle = hasLaser ? laserAngleDeg : 90;
-  const angleOk = deviceAngle !== null && Math.abs(deviceAngle - targetAngle) <= 3;
-
-  useEffect(() => {
-    DeviceMotion.setUpdateInterval(200);
-    const sub = DeviceMotion.addListener((data) => {
-      if (data.rotation) {
-        const betaDeg = Math.abs((data.rotation.beta * 180) / Math.PI);
-        const gammaDeg = Math.abs((data.rotation.gamma * 180) / Math.PI);
-        setDeviceAngle(Math.round(Math.max(betaDeg, gammaDeg)));
-      }
-    });
-    return () => sub.remove();
-  }, []);
 
   const handlePostureSelect = (p: WeldPosture) => {
     setPosture(p);
@@ -163,7 +145,7 @@ export default function RegisterPhotoScreen() {
     }
   };
 
-  const handleCameraCapture = useCallback((uri: string) => {
+  const handleCameraCapture = useCallback((uri: string, _laserAngleDeg?: number) => {
     if (cameraSlot) {
       setPhotos(prev => ({ ...prev, [cameraSlot]: uri }));
     }
@@ -267,7 +249,6 @@ export default function RegisterPhotoScreen() {
           aiModel: selectedAI,
           isFillet,
           hasLaser,
-          laserAngleDeg,
         }),
       });
 
@@ -445,22 +426,7 @@ export default function RegisterPhotoScreen() {
             ))}
           </View>
           {hasLaser && (
-            <View style={{ gap: 8 }}>
-              <Text style={styles.laserAngleLabel}>레이저 각도</Text>
-              <View style={chipStyles.container}>
-                {[30, 45, 60].map((deg) => (
-                  <Pressable
-                    key={deg}
-                    style={[chipStyles.chip, laserAngleDeg === deg && chipStyles.chipActive]}
-                    onPress={() => { setLaserAngleDeg(deg); Haptics.selectionAsync(); }}
-                  >
-                    <Text style={[chipStyles.chipText, laserAngleDeg === deg && chipStyles.chipTextActive]}>
-                      {deg}°
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
+            <Text style={styles.laserAngleHint}>각도는 카메라 촬영 화면에서 선택하세요</Text>
           )}
         </View>
 
@@ -642,25 +608,6 @@ export default function RegisterPhotoScreen() {
       </KeyboardAwareScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        {/* 자이로 각도 가이드 */}
-        <View style={[styles.gyroRow, angleOk && styles.gyroRowOk]}>
-          <Ionicons
-            name="compass-outline"
-            size={16}
-            color={angleOk ? "#10b981" : Colors.textMuted}
-          />
-          <Text style={[styles.gyroText, angleOk && styles.gyroTextOk]}>
-            {deviceAngle !== null
-              ? `현재 ${deviceAngle}° / 목표 ${targetAngle}°${angleOk ? " ✓" : ""}`
-              : "센서 초기화 중..."}
-          </Text>
-          {deviceAngle !== null && (
-            <Text style={[styles.gyroDiff, angleOk && styles.gyroTextOk]}>
-              {angleOk ? "±3° 이내" : `편차 ${Math.abs(deviceAngle - targetAngle)}°`}
-            </Text>
-          )}
-        </View>
-
         {/* AI 모델 선택기 */}
         <View style={styles.aiSelector}>
           <Pressable
@@ -805,6 +752,7 @@ export default function RegisterPhotoScreen() {
         visible={cameraSlot !== null}
         onClose={() => setCameraSlot(null)}
         onCapture={handleCameraCapture}
+        hasLaser={hasLaser}
       />
     </View>
   );
@@ -1173,17 +1121,11 @@ const styles = StyleSheet.create({
   },
   laserOptionText: { color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 13 },
   laserOptionTextActive: { color: Colors.primary },
-  laserAngleLabel: { color: Colors.textSecondary, fontFamily: "Inter_500Medium", fontSize: 13 },
-
-  // 자이로
-  gyroRow: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: Colors.surface, borderRadius: 10,
-    borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10,
+  laserAngleHint: {
+    color: Colors.textMuted,
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    fontStyle: "italic",
+    paddingLeft: 2,
   },
-  gyroRowOk: { borderColor: "#10b981", backgroundColor: "#10b98118" },
-  gyroText: { flex: 1, color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 13 },
-  gyroTextOk: { color: "#10b981" },
-  gyroDiff: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12 },
 });
