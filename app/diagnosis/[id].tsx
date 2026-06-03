@@ -475,6 +475,16 @@ export default function DiagnosisScreen() {
   const [isSharingPDF, setIsSharingPDF] = useState(false);
   const [reanalyzeModel, setReanalyzeModel] = useState<"gpt-4o" | "claude-sonnet">("gpt-4o");
 
+  // AI 재분석 결과 — result 전체를 덮어쓰지 않고 LLM 필드만 병합
+  type LlmReportData = {
+    comprehensiveReport: string;
+    improvements: string[];
+    top3Defects: string[];
+    overallVerdict: string;
+    aiScore: number;
+  };
+  const [llmReport, setLlmReport] = useState<LlmReportData | null>(null);
+
   const zoomScale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const zoomTransX = useSharedValue(0);
@@ -815,6 +825,21 @@ export default function DiagnosisScreen() {
 
   const isQuickMode = !result.comprehensiveReport && (!result.improvements || result.improvements.length === 0);
 
+  // llmReport(재분석) > result(기존 DB 저장) 순으로 우선순위 적용
+  const displayReport = useMemo<LlmReportData | null>(() => {
+    if (llmReport) return llmReport;
+    if (result.comprehensiveReport) {
+      return {
+        comprehensiveReport: result.comprehensiveReport,
+        improvements: result.improvements ?? [],
+        top3Defects: result.top3Defects ?? [],
+        overallVerdict: result.overallVerdict,
+        aiScore: result.aiScore,
+      };
+    }
+    return null;
+  }, [llmReport, result]);
+
   const handleReanalyze = async () => {
     setIsReanalyzing(true);
     try {
@@ -823,12 +848,35 @@ export default function DiagnosisScreen() {
       const resp = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resultId: result.id, aiModel: reanalyzeModel }),
+        body: JSON.stringify({
+          resultId:      result.id,
+          aiModel:       reanalyzeModel,
+          // DB에 없는 측정값을 백엔드 LLM 컨텍스트용으로 전달
+          laserAnalysis:  result.laserAnalysis ?? null,
+          filletAnalysis: result.filletAnalysis ?? null,
+          visionData: {
+            aiScore:      result.aiScore,
+            beadAnalysis: result.beadAnalysis,
+            defects:      result.defects,
+            top3Defects:  result.top3Defects,
+          },
+        }),
       });
       if (resp.ok) {
-        await refreshResults();
+        const data = await resp.json();
+        // result 전체를 덮어쓰지 않고 LLM 필드만 병합
+        setLlmReport({
+          comprehensiveReport: data.comprehensiveReport ?? "",
+          improvements:        data.improvements ?? [],
+          top3Defects:         data.top3Defects ?? [],
+          overallVerdict:      data.overallVerdict ?? result.overallVerdict,
+          aiScore:             data.aiScore ?? result.aiScore,
+        });
+        // DB 캐시 갱신은 백그라운드로 (화면 전환 후 반영)
+        refreshResults().catch(() => {});
       } else {
-        Alert.alert("오류", "재분석에 실패했습니다. 잠시 후 다시 시도해주세요.");
+        const errBody = await resp.json().catch(() => ({}));
+        Alert.alert("재분석 오류", errBody?.message ?? "재분석에 실패했습니다. 잠시 후 다시 시도해주세요.");
       }
     } catch {
       Alert.alert("오류", "네트워크 오류가 발생했습니다.");
@@ -1277,152 +1325,159 @@ export default function DiagnosisScreen() {
           )}
         </SectionCard>
 
-        {isQuickMode ? (
-          <SectionCard title="비전 측정 완료" icon="flash-outline">
+        {/* AI 재분석 실행 패널 — 항상 표시 */}
+        <SectionCard title="AI 종합 분석" icon="robot-outline">
+          {!displayReport && !isReanalyzing && (
             <Text style={{ color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 14, lineHeight: 22 }}>
               비드 치수 및 결함 탐지가 완료되었습니다.{"\n"}
               AI 전문가 종합 진단 리포트가 필요하면 아래에서 실행하세요.
             </Text>
-
-            {/* AI 모델 선택 */}
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {(["gpt-4o", "claude-sonnet"] as const).map((m) => (
-                <Pressable
-                  key={m}
-                  onPress={() => setReanalyzeModel(m)}
-                  style={{
-                    flex: 1, paddingVertical: 8, borderRadius: 10,
-                    borderWidth: 1.5,
-                    borderColor: reanalyzeModel === m ? Colors.primary : Colors.border,
-                    backgroundColor: reanalyzeModel === m ? Colors.primary + "15" : Colors.card,
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{
-                    fontFamily: "Inter_600SemiBold", fontSize: 13,
-                    color: reanalyzeModel === m ? Colors.primary : Colors.textMuted,
-                  }}>
-                    {m === "gpt-4o" ? "GPT-4o" : "Claude Sonnet"}
-                  </Text>
-                  <Text style={{ fontFamily: "Inter_400Regular", fontSize: 10, color: Colors.textMuted, marginTop: 1 }}>
-                    {m === "gpt-4o" ? "OpenAI" : "Anthropic"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Pressable
-              onPress={handleReanalyze}
-              disabled={isReanalyzing}
-              style={[styles.reanalyzeBtn, isReanalyzing && { opacity: 0.6 }]}
-            >
-              {isReanalyzing ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <MaterialCommunityIcons name="robot-outline" size={18} color="#fff" />
-                  <Text style={styles.reanalyzeBtnText}>AI 종합 분석 실행</Text>
-                </>
-              )}
-            </Pressable>
-            <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, textAlign: "center" }}>
-              AI 분석은 30~60초 소요됩니다
+          )}
+          {displayReport && !isReanalyzing && (
+            <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 }}>
+              AI 리포트가 아래에 추가되었습니다. 재실행하면 덮어씁니다.
             </Text>
-          </SectionCard>
-        ) : (
-        <SectionCard title={t("diag_aiReport")} icon="robot">
-          <View style={[styles.verdictBanner, {
-            backgroundColor: result.overallVerdict === "PASS" ? Colors.success + "22" : Colors.danger + "22",
-            borderColor: result.overallVerdict === "PASS" ? Colors.success + "55" : Colors.danger + "55",
-          }]}>
-            <Ionicons
-              name={result.overallVerdict === "PASS" ? "checkmark-circle" : "close-circle"}
-              size={32}
-              color={result.overallVerdict === "PASS" ? Colors.success : Colors.danger}
-            />
-            <View>
-              <Text style={[styles.verdictText, {
-                color: result.overallVerdict === "PASS" ? Colors.success : Colors.danger,
-              }]}>
-                {result.overallVerdict}
-              </Text>
-              <Text style={styles.verdictSub}>{t("diag_overallVerdict")}</Text>
-            </View>
-            <View style={styles.verdictScoreSection}>
-              <Text style={[styles.verdictScore, { color: getGradeColor(result.aiScore) }]}>
-                {result.aiScore}
-              </Text>
-              <Text style={styles.verdictScoreLabel}>{t("diag_outOf100")}</Text>
-            </View>
-          </View>
+          )}
 
-          <View>
-            <Text style={styles.subLabel}>{t("diag_top3")}</Text>
-            {result.top3Defects.length === 0 ? (
-              <Text style={styles.noDefect}>{t("diag_noDefect")}</Text>
-            ) : (
-              result.top3Defects.map((d, i) => (
-                <View key={d} style={styles.top3Row}>
-                  <Text style={[styles.top3Rank, { color: [Colors.danger, Colors.warning, Colors.warning][i] }]}>
-                    {i + 1}
-                  </Text>
-                  <Text style={styles.top3Name}>{d}</Text>
-                </View>
-              ))
-            )}
-          </View>
-
-          {result.comprehensiveReport ? (
-            <View style={styles.comprehensiveBox}>
-              <View style={styles.comprehensiveHeader}>
-                <MaterialCommunityIcons name="brain" size={15} color={Colors.primary} />
-                <Text style={styles.comprehensiveTitle}>
-                  {t("diag_aiSummary")} {userResults.length > 1 ? t("diag_historyReflected").replace("{n}", String(userResults.length)) : ""}
+          {/* AI 모델 선택 */}
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {(["gpt-4o", "claude-sonnet"] as const).map((m) => (
+              <Pressable
+                key={m}
+                onPress={() => setReanalyzeModel(m)}
+                disabled={isReanalyzing}
+                style={{
+                  flex: 1, paddingVertical: 8, borderRadius: 10,
+                  borderWidth: 1.5,
+                  borderColor: reanalyzeModel === m ? Colors.primary : Colors.border,
+                  backgroundColor: reanalyzeModel === m ? Colors.primary + "15" : Colors.card,
+                  alignItems: "center",
+                  opacity: isReanalyzing ? 0.5 : 1,
+                }}
+              >
+                <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 13, color: reanalyzeModel === m ? Colors.primary : Colors.textMuted }}>
+                  {m === "gpt-4o" ? "GPT-4o" : "Claude Sonnet"}
                 </Text>
-              </View>
-              {(() => {
-                const sections = parseReportSections(result.comprehensiveReport);
-                if (sections.length === 0) {
-                  // 헤더가 없는 단일 보고서는 폴백으로 그냥 텍스트 출력
-                  return <Text style={styles.comprehensiveText}>{result.comprehensiveReport}</Text>;
-                }
-                return (
-                  <View style={{ gap: 10 }}>
-                    {sections.map((s) => {
-                      const theme = REPORT_SECTION_THEMES[s.num] ?? {
-                        color: Colors.primary,
-                        icon: "circle-outline",
-                      };
-                      return (
-                        <View
-                          key={`sec-${s.num}`}
-                          style={[
-                            styles.reportSectionCard,
-                            { borderLeftColor: theme.color, backgroundColor: theme.color + "0E" },
-                          ]}
-                        >
-                          <View style={styles.reportSectionHeader}>
-                            <View style={[styles.reportSectionBadge, { backgroundColor: theme.color }]}>
-                              <Text style={styles.reportSectionBadgeText}>{s.num}</Text>
-                            </View>
-                            <MaterialCommunityIcons
-                              name={theme.icon as any}
-                              size={16}
-                              color={theme.color}
-                            />
-                            <Text style={[styles.reportSectionTitle, { color: theme.color }]}>
-                              {s.title}
-                            </Text>
-                          </View>
-                          <ReportSectionBody body={s.body} accentColor={theme.color} />
-                        </View>
-                      );
-                    })}
-                  </View>
-                );
-              })()}
+                <Text style={{ fontFamily: "Inter_400Regular", fontSize: 10, color: Colors.textMuted, marginTop: 1 }}>
+                  {m === "gpt-4o" ? "OpenAI" : "Anthropic"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <Pressable
+            onPress={handleReanalyze}
+            disabled={isReanalyzing}
+            style={[styles.reanalyzeBtn, isReanalyzing && { opacity: 0.6 }]}
+          >
+            {isReanalyzing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="robot-outline" size={18} color="#fff" />
+                <Text style={styles.reanalyzeBtnText}>
+                  {displayReport ? "AI 리포트 재실행" : "AI 종합 분석 실행"}
+                </Text>
+              </>
+            )}
+          </Pressable>
+          <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, textAlign: "center" }}>
+            AI 분석은 30~60초 소요됩니다
+          </Text>
+        </SectionCard>
+
+        {/* AI 종합 리포트 — 하단에 Append (로딩 or 결과) */}
+        {(isReanalyzing || displayReport) && (
+        <SectionCard title={t("diag_aiReport")} icon="robot">
+          {isReanalyzing ? (
+            /* 하단 리포트 영역 스켈레톤 — 전체 화면 블로킹 없음 */
+            <View style={{ alignItems: "center", paddingVertical: 24, gap: 12 }}>
+              <ActivityIndicator color={Colors.primary} size="large" />
+              <Text style={{ color: Colors.textSecondary, fontFamily: "Inter_500Medium", fontSize: 14 }}>
+                AI가 종합 리포트를 작성 중입니다...
+              </Text>
+              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, textAlign: "center" }}>
+                비전 측정 데이터를 바탕으로{"\n"}상세 진단 리포트를 생성하고 있습니다
+              </Text>
             </View>
-          ) : null}
+          ) : displayReport && (
+            <>
+              <View style={[styles.verdictBanner, {
+                backgroundColor: displayReport.overallVerdict === "PASS" ? Colors.success + "22" : Colors.danger + "22",
+                borderColor: displayReport.overallVerdict === "PASS" ? Colors.success + "55" : Colors.danger + "55",
+              }]}>
+                <Ionicons
+                  name={displayReport.overallVerdict === "PASS" ? "checkmark-circle" : "close-circle"}
+                  size={32}
+                  color={displayReport.overallVerdict === "PASS" ? Colors.success : Colors.danger}
+                />
+                <View>
+                  <Text style={[styles.verdictText, { color: displayReport.overallVerdict === "PASS" ? Colors.success : Colors.danger }]}>
+                    {displayReport.overallVerdict}
+                  </Text>
+                  <Text style={styles.verdictSub}>{t("diag_overallVerdict")}</Text>
+                </View>
+                <View style={styles.verdictScoreSection}>
+                  <Text style={[styles.verdictScore, { color: getGradeColor(displayReport.aiScore) }]}>
+                    {displayReport.aiScore}
+                  </Text>
+                  <Text style={styles.verdictScoreLabel}>{t("diag_outOf100")}</Text>
+                </View>
+              </View>
+
+              <View>
+                <Text style={styles.subLabel}>{t("diag_top3")}</Text>
+                {displayReport.top3Defects.length === 0 ? (
+                  <Text style={styles.noDefect}>{t("diag_noDefect")}</Text>
+                ) : (
+                  displayReport.top3Defects.map((d, i) => (
+                    <View key={d} style={styles.top3Row}>
+                      <Text style={[styles.top3Rank, { color: [Colors.danger, Colors.warning, Colors.warning][i] }]}>
+                        {i + 1}
+                      </Text>
+                      <Text style={styles.top3Name}>{d}</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+
+              {displayReport.comprehensiveReport ? (
+                <View style={styles.comprehensiveBox}>
+                  <View style={styles.comprehensiveHeader}>
+                    <MaterialCommunityIcons name="brain" size={15} color={Colors.primary} />
+                    <Text style={styles.comprehensiveTitle}>
+                      {t("diag_aiSummary")} {userResults.length > 1 ? t("diag_historyReflected").replace("{n}", String(userResults.length)) : ""}
+                    </Text>
+                  </View>
+                  {(() => {
+                    const sections = parseReportSections(displayReport.comprehensiveReport);
+                    if (sections.length === 0) {
+                      return <Text style={styles.comprehensiveText}>{displayReport.comprehensiveReport}</Text>;
+                    }
+                    return (
+                      <View style={{ gap: 10 }}>
+                        {sections.map((s) => {
+                          const theme = REPORT_SECTION_THEMES[s.num] ?? { color: Colors.primary, icon: "circle-outline" };
+                          return (
+                            <View key={`sec-${s.num}`} style={[styles.reportSectionCard, { borderLeftColor: theme.color, backgroundColor: theme.color + "0E" }]}>
+                              <View style={styles.reportSectionHeader}>
+                                <View style={[styles.reportSectionBadge, { backgroundColor: theme.color }]}>
+                                  <Text style={styles.reportSectionBadgeText}>{s.num}</Text>
+                                </View>
+                                <MaterialCommunityIcons name={theme.icon as any} size={16} color={theme.color} />
+                                <Text style={[styles.reportSectionTitle, { color: theme.color }]}>{s.title}</Text>
+                              </View>
+                              <ReportSectionBody body={s.body} accentColor={theme.color} />
+                            </View>
+                          );
+                        })}
+                      </View>
+                    );
+                  })()}
+                </View>
+              ) : null}
+            </>
+          )}
         </SectionCard>
         )}
 
@@ -1595,12 +1650,12 @@ export default function DiagnosisScreen() {
           <ScoreCompareBar selfScore={result.selfScore} aiScore={result.aiScore} t={t} />
         </SectionCard>
 
-        {!isQuickMode && (
+        {displayReport && displayReport.improvements.length > 0 && (
           <SectionCard title={t("diag_improvements")} icon="lightbulb-on-outline">
             <Text style={styles.improvementSubtitle}>
               {userResults.length > 1 ? t("diag_improvementMulti").replace("{n}", String(userResults.length)) : t("diag_improvementSingle")}
             </Text>
-            {result.improvements.map((tip, i) => (
+            {displayReport.improvements.map((tip, i) => (
               <View key={i} style={styles.improvementRow}>
                 <View style={[styles.improvementDot, { backgroundColor: i === 0 ? Colors.danger : i === 1 ? Colors.warning : Colors.primary }]} />
                 <Text style={styles.improvementText}>{tip}</Text>

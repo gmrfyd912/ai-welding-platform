@@ -314,7 +314,8 @@ export function registerWeldAnalysisRoute(app: Express): void {
 
   // ── 빠른 측정 결과를 AI 종합 분석으로 재분석 ─────────────────────
   app.post("/api/reanalyze", largeBodyParser, async (req: Request, res: Response) => {
-    const { resultId, aiModel } = req.body;
+    // laserAnalysis, filletAnalysis, visionData 는 DB에 없으므로 프론트에서 전달받음
+    const { resultId, aiModel, laserAnalysis, filletAnalysis, visionData } = req.body;
     if (!resultId) return res.status(400).json({ error: "resultId 필요" });
 
     try {
@@ -344,6 +345,68 @@ export function registerWeldAnalysisRoute(app: Express): void {
       const sideBase64 = photos?.side ? await urlToBase64(photos.side) : undefined;
       const backBase64 = photos?.back ? await urlToBase64(photos.back) : undefined;
 
+      // ── 기존 비전 측정값 → LLM 시스템 컨텍스트 문자열로 직렬화 ──
+      const safeJson = (v: any) => {
+        if (!v) return null;
+        return typeof v === "string" ? JSON.parse(v) : v;
+      };
+      const dbBead    = safeJson(row.bead_analysis);
+      const dbDefects = (safeJson(row.defects) ?? []) as any[];
+      const dbTop3    = (safeJson(row.top3_defects) ?? []) as string[];
+
+      const ctxLines: string[] = [
+        "[비전 측정 결과 — AI가 이 수치를 반드시 종합 리포트에 반영할 것]",
+        `AI 점수: ${row.ai_score ?? "N/A"}점 (${row.overall_verdict ?? "N/A"})`,
+        `공정: ${row.process || "N/A"} / 자세: ${row.posture || "N/A"} / 재료: ${row.material || "N/A"}`,
+      ];
+
+      if (dbBead) {
+        ctxLines.push(`비드 총점: ${dbBead.totalScore ?? "N/A"}점`);
+        if (dbBead.width?.value)       ctxLines.push(`비드 폭 측정값: ${dbBead.width.value} (점수 ${dbBead.width.score}점)`);
+        if (dbBead.straightness?.value) ctxLines.push(`직진도 측정값: ${dbBead.straightness.value} (점수 ${dbBead.straightness.score}점)`);
+        if (dbBead.height?.value)      ctxLines.push(`높이 측정값: ${dbBead.height.value} (점수 ${dbBead.height.score}점)`);
+      }
+
+      if (dbTop3.length > 0) ctxLines.push(`주요 결함 Top3: ${dbTop3.join(", ")}`);
+
+      const detectedDefects = dbDefects.filter((d: any) => d.detected);
+      if (detectedDefects.length > 0) {
+        ctxLines.push(
+          `검출 결함 상세: ${detectedDefects
+            .map((d: any) => `${d.name}(심각도:${d.severity}, 측정:${d.measured}, 기준:${d.limit}, 결과:${d.result})`)
+            .join(" / ")}`
+        );
+      }
+
+      // visionData: 프론트에서 추가 전달한 보조 데이터 (있을 경우)
+      if (visionData?.aiScore != null) ctxLines.push(`빠른 분석 aiScore: ${visionData.aiScore}`);
+
+      // laserAnalysis: DB에 없으므로 프론트에서 전달
+      if (laserAnalysis?.status === "success") {
+        ctxLines.push(
+          `레이저 3D 측정: 최대높이=${laserAnalysis.beadHeightMax}mm / 최소높이=${laserAnalysis.beadHeightMin}mm` +
+          ` / 평균높이=${laserAnalysis.beadHeightAvg}mm / 볼록성=${laserAnalysis.convexity}(${laserAnalysis.convexityMm}mm)`
+        );
+        if (laserAnalysis.is_cross_validated) {
+          ctxLines.push(`교차검증 신뢰도: ${laserAnalysis.confidence_score}%`);
+        }
+      }
+
+      // filletAnalysis: DB에 없으므로 프론트에서 전달
+      if (filletAnalysis?.beadWidth != null) {
+        ctxLines.push(
+          `필렛 분석: 비드폭=${filletAnalysis.beadWidth}mm / 등각=${filletAnalysis.equalLeg}mm` +
+          ` / 이론 목두께=${filletAnalysis.theoreticalThroat}mm / 실제 목두께=${filletAnalysis.actualThroat}mm` +
+          ` / 볼록성=${filletAnalysis.convexity?.type}(${filletAnalysis.convexity?.value_mm}mm)`
+        );
+        if (filletAnalysis.unequalLeg?.isUnequal) {
+          ctxLines.push(`불균등 각장: Z1=${filletAnalysis.unequalLeg.z1}mm / Z2=${filletAnalysis.unequalLeg.z2}mm`);
+        }
+      }
+
+      const measurementContext = ctxLines.join("\n");
+      console.log(`[reanalyze] 측정 컨텍스트 ${ctxLines.length}줄 LLM에 주입`);
+
       let adminFeedback = "";
       try {
         const fb = await pool.query(
@@ -365,40 +428,36 @@ export function registerWeldAnalysisRoute(app: Express): void {
         passType:   "",
         aiModel:    aiModel || "gpt",
         adminFeedback,
-        userHistory:        "",
+        userHistory:        measurementContext,   // 측정값 전체 주입
         plateThickness:     "",
         pipeOuterDiameterMm: "",
         language:    "ko",
         analysisMode: "ai",
       });
 
+      // LLM 생성 필드만 DB 업데이트 (비전 측정값은 원본 보존)
       await pool.query(`
         UPDATE weld_results SET
-          ai_score           = $1,
-          overall_verdict    = $2,
-          bead_analysis      = $3,
-          defects            = $4,
-          defect_locations   = $5,
-          photo_analyses     = $6,
-          improvements       = $7,
-          comprehensive_report = $8,
-          top3_defects       = $9
-        WHERE id = $10
+          improvements       = $1,
+          comprehensive_report = $2,
+          top3_defects       = $3
+        WHERE id = $4
       `, [
-        aiData.aiScore,
-        aiData.overallVerdict,
-        JSON.stringify(aiData.beadAnalysis),
-        JSON.stringify(aiData.defects),
-        JSON.stringify(aiData.defectLocations ?? []),
-        aiData.photoAnalyses ? JSON.stringify(aiData.photoAnalyses) : null,
         JSON.stringify(aiData.improvements ?? []),
         aiData.comprehensiveReport ?? null,
         JSON.stringify(aiData.top3Defects ?? []),
         resultId,
       ]);
 
-      console.log(`[reanalyze] 완료: ${resultId} | aiScore=${aiData.aiScore}`);
-      res.json(aiData);
+      console.log(`[reanalyze] 완료: ${resultId} | 리포트 ${aiData.comprehensiveReport?.length ?? 0}자`);
+      // 프론트가 병합(merge)할 수 있도록 LLM 생성 필드만 반환
+      res.json({
+        comprehensiveReport: aiData.comprehensiveReport,
+        improvements:        aiData.improvements ?? [],
+        top3Defects:         aiData.top3Defects ?? [],
+        overallVerdict:      aiData.overallVerdict,
+        aiScore:             aiData.aiScore,
+      });
     } catch (err: any) {
       console.error("[reanalyze] 오류:", err);
       if (err?.status === 400) {
