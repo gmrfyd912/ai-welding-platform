@@ -7,6 +7,78 @@ const largeBodyParser = express.json({ limit: "30mb" });
 const FASTAPI_BASE = "http://localhost:8080";
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
 
+// ══════════════════════════════════════════════════════════════════
+// 🛠 개발자용 Mock 데이터 — 실제 레이저 장비 없이 3D 로직 테스트
+// isMockLaser=true 요청 시 FastAPI 결과에 이 데이터를 강제 덮어씌움
+// ══════════════════════════════════════════════════════════════════
+const MOCK_LASER_ANALYSIS = {
+  status:             "success",
+  beadHeightMax:      2.48,
+  beadHeightMin:      0.92,
+  beadHeightAvg:      1.71,
+  heightVariance:     1.56,
+  convexity:          "convex",
+  convexityMm:        1.71,
+  laserGridSpacingMm: 3.12,
+  profile: [
+    { x_pct: 10, height_mm: 1.20 },
+    { x_pct: 20, height_mm: 1.55 },
+    { x_pct: 30, height_mm: 1.98 },
+    { x_pct: 40, height_mm: 2.48 },
+    { x_pct: 50, height_mm: 2.31 },
+    { x_pct: 60, height_mm: 8.90 },   // ← 스패터로 격자 가림 → 이상치
+    { x_pct: 70, height_mm: 1.85 },
+    { x_pct: 80, height_mm: 1.44 },
+    { x_pct: 90, height_mm: 0.92 },
+  ],
+  worstPoint: { x_pct: 40, y_pct: 50, height_mm: 2.48 },
+  gridLines:  [],
+  message:    "격자 간격 3.12mm | 수평선 22개 검출 [MOCK 데이터]",
+  // 교차 검증 필드 (fuse_and_validate 결과)
+  is_cross_validated: true,
+  confidence_score:   85.5,
+  corrected_profile: [
+    { x_pct: 10, height_mm: 1.20, source: "laser" },
+    { x_pct: 20, height_mm: 1.55, source: "laser" },
+    { x_pct: 30, height_mm: 1.98, source: "laser" },
+    { x_pct: 40, height_mm: 2.48, source: "laser" },
+    { x_pct: 50, height_mm: 2.31, source: "laser" },
+    { x_pct: 60, height_mm: 1.90, source: "estimated" }, // 보정됨
+    { x_pct: 70, height_mm: 1.85, source: "laser" },
+    { x_pct: 80, height_mm: 1.44, source: "laser" },
+    { x_pct: 90, height_mm: 0.92, source: "laser" },
+  ],
+  segment_errors: [
+    { x_pct: 10, error_pct:   5.2, is_outlier: false },
+    { x_pct: 20, error_pct:   8.1, is_outlier: false },
+    { x_pct: 30, error_pct:  11.3, is_outlier: false },
+    { x_pct: 40, error_pct:   9.7, is_outlier: false },
+    { x_pct: 50, error_pct:   7.4, is_outlier: false },
+    { x_pct: 60, error_pct: 368.4, is_outlier: true  }, // ← 이상치 탐지
+    { x_pct: 70, error_pct:   6.8, is_outlier: false },
+    { x_pct: 80, error_pct:   4.1, is_outlier: false },
+    { x_pct: 90, error_pct:  12.9, is_outlier: false },
+  ],
+} as const;
+
+const MOCK_FILLET_ANALYSIS = {
+  beadWidth:          9.2,
+  equalLeg:           6.8,
+  theoreticalThroat:  4.81,
+  actualThroat:       4.56,
+  unequalLeg: {
+    z1:        7.1,
+    z2:        6.5,
+    isUnequal: true,
+    difference: 0.6,
+  },
+  convexity: {
+    type:     "convex",
+    value_mm: 1.4,
+  },
+  note: "[MOCK 가상 데이터 — 실제 필릿 측정값이 아님]",
+} as const;
+
 // ── AbortSignal 기반 타임아웃 fetch ─────────────────────────────
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
@@ -92,6 +164,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
       selfScore, beadType, passType, aiModel,
       previousResultsSummary, plateThickness, pipeOuterDiameterMm,
       language, analysisMode,
+      isMockLaser, isFillet,
     } = req.body;
 
     const frontPhoto = photos?.front || imageBase64;
@@ -167,9 +240,24 @@ export function registerWeldAnalysisRoute(app: Express): void {
       if (!result) throw lastErr ?? new Error("FastAPI 호출 실패 (원인 불명)");
 
       console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
+
+      // ── Mock 데이터 주입 (개발자용) ─────────────────────────────
+      let laserAnalysis = result.visionMeasurement?.laser_analysis ?? null;
+      let filletAnalysis = result.filletAnalysis ?? null;
+
+      if (isMockLaser === true || isMockLaser === "true") {
+        console.warn("[analyze-weld] 🛠 Mock 레이저 데이터 주입 (isMockLaser=true)");
+        laserAnalysis = { ...MOCK_LASER_ANALYSIS };
+        if (isFillet === true || isFillet === "true") {
+          console.warn("[analyze-weld] 🛠 Mock 필릿 데이터 주입 (isFillet=true)");
+          filletAnalysis = { ...MOCK_FILLET_ANALYSIS };
+        }
+      }
+
       res.json({
         ...result,
-        laserAnalysis: result.visionMeasurement?.laser_analysis ?? null,
+        laserAnalysis,
+        filletAnalysis,
       });
 
     } catch (err: any) {
