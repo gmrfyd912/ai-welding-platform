@@ -4,8 +4,10 @@ import pool from "./db";
 
 const largeBodyParser = express.json({ limit: "30mb" });
 
-const FASTAPI_BASE = "http://localhost:8080";
+// FASTAPI_URL 환경 변수로 FastAPI 주소를 외부 구성 가능 (Render 등 배포 환경 대응)
+const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://localhost:8080";
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
+console.log(`[WeldAnalysis] FastAPI endpoint = ${FASTAPI_BASE}`);
 
 // ══════════════════════════════════════════════════════════════════
 // 🛠 개발자용 Mock 데이터 — 실제 레이저 장비 없이 3D 로직 테스트
@@ -108,6 +110,10 @@ async function callFastApiAnalyze(params: {
   pipeOuterDiameterMm: string;
   language:       string;
   analysisMode:   string;
+  // 추가 파라미터 (FastAPI Form 기본값 있음)
+  isFillet?:      boolean;
+  hasLaser?:      boolean;
+  laserAngleDeg?: string;
 }): Promise<any> {
   const formData = new FormData();
 
@@ -134,7 +140,11 @@ async function callFastApiAnalyze(params: {
   formData.append("plate_thickness", params.plateThickness);
   formData.append("pipe_outer_diameter_mm", params.pipeOuterDiameterMm);
   formData.append("language",       params.language);
-  formData.append("analysis_mode",  params.analysisMode || "ai");
+  formData.append("analysis_mode",  params.analysisMode || "quick");
+  // 필릿·레이저 파라미터 — FastAPI Form 기본값(false/45)이 있으나 명시 전달
+  formData.append("is_fillet",      params.isFillet  ? "true" : "false");
+  formData.append("has_laser",      params.hasLaser  ? "true" : "false");
+  formData.append("laser_angle_deg", params.laserAngleDeg ?? "45");
 
   const resp = await fetchWithTimeout(
     `${FASTAPI_BASE}/analyze-welding`,
@@ -164,7 +174,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
       selfScore, beadType, passType, aiModel,
       previousResultsSummary, plateThickness, pipeOuterDiameterMm,
       language, analysisMode,
-      isMockLaser, isFillet,
+      isMockLaser, isFillet, hasLaser, laserAngleDeg,
     } = req.body;
 
     const frontPhoto = photos?.front || imageBase64;
@@ -205,7 +215,10 @@ export function registerWeldAnalysisRoute(app: Express): void {
         plateThickness: plateThickness || "",
         pipeOuterDiameterMm: pipeOuterDiameterMm ? String(pipeOuterDiameterMm) : "",
         language:       language || "ko",
-        analysisMode:   analysisMode || "ai",
+        analysisMode:   "quick",        // 최초 분석은 항상 quick 모드 (LLM 없음)
+        isFillet:       isFillet === true || isFillet === "true",
+        hasLaser:       hasLaser === true || hasLaser === "true",
+        laserAngleDeg:  laserAngleDeg ? String(laserAngleDeg) : "45",
       };
 
       // 콜드 스타트 사전 워밍업: FastAPI에 가벼운 ping (실패해도 무시)
@@ -273,10 +286,16 @@ export function registerWeldAnalysisRoute(app: Express): void {
         console.warn(`[analyze-weld] 잘못된 사진 — 사용자에게 안내: ${userMessage}`);
         return res.status(400).json({ error: code, message: userMessage });
       }
+      const isFetchFailed = err.message?.includes("fetch failed") || err.message?.includes("ECONNREFUSED");
       console.error(`[analyze-weld] 최종 실패 | 오류: ${err.message}`);
+      if (isFetchFailed) {
+        console.error(`[analyze-weld] FastAPI 연결 실패 — FASTAPI_URL=${FASTAPI_BASE} 확인 필요`);
+      }
       res.status(503).json({
         error: "AI_ANALYSIS_FAILED",
-        message: "AI 분석 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+        message: isFetchFailed
+          ? "비전 분석 서버에 연결할 수 없습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
+          : "AI 분석 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
         detail: err.message?.slice(0, 200),
       });
     }
