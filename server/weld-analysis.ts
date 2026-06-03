@@ -288,14 +288,24 @@ export function registerWeldAnalysisRoute(app: Express): void {
         return res.status(400).json({ error: code, message: userMessage });
       }
       const isFetchFailed = err.message?.includes("fetch failed") || err.message?.includes("ECONNREFUSED");
-      console.error(`[analyze-weld] 최종 실패 | 오류: ${err.message}`);
+      const isTimeout    = err.message?.includes("AbortError") || err.name === "AbortError";
+      console.error(`[analyze-weld] ══ 최종 실패 ══`);
+      console.error(`[analyze-weld]  메시지  : ${err.message}`);
+      console.error(`[analyze-weld]  HTTP상태 : ${err?.status ?? "N/A"}`);
+      console.error(`[analyze-weld]  응답본문 : ${err?.body?.slice(0, 300) ?? "N/A"}`);
+      console.error(`[analyze-weld]  FastAPI  : ${FASTAPI_BASE}/analyze-welding`);
       if (isFetchFailed) {
-        console.error(`[analyze-weld] FastAPI 연결 실패 — FASTAPI_URL=${FASTAPI_BASE} 확인 필요`);
+        console.error(`[analyze-weld]  → FastAPI 프로세스가 실행 중인지 확인 (포트 ${FASTAPI_BASE})`);
+      }
+      if (isTimeout) {
+        console.error(`[analyze-weld]  → ${FASTAPI_TIMEOUT_MS / 1000}초 타임아웃 초과 — FastAPI 처리 지연`);
       }
       res.status(503).json({
         error: "AI_ANALYSIS_FAILED",
         message: isFetchFailed
           ? "비전 분석 서버에 연결할 수 없습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
+          : isTimeout
+          ? "AI 분석 서버 응답 시간이 초과되었습니다. 사진 파일 크기를 줄이거나 잠시 후 다시 시도해주세요."
           : "AI 분석 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
         detail: err.message?.slice(0, 200),
       });

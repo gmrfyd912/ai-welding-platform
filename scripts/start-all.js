@@ -13,29 +13,52 @@
  *   pip install uvicorn fastapi openai anthropic httpx numpy opencv-python-headless python-multipart
  */
 
-const { spawn } = require("child_process");
-const path      = require("path");
-const fs        = require("fs");
-
+const { spawn, execSync } = require("child_process");
+const net  = require("net");
+const path = require("path");
+const fs   = require("fs");
 const os   = require("os");
 const ROOT = path.resolve(__dirname, "..");
 const FASTAPI_PORT = process.env.FASTAPI_PORT ?? "8080";
 const NODE_PORT    = process.env.PORT          ?? "5001";
 
-// 로컬 Wi-Fi IP 자동 감지 (모바일 기기가 접속해야 할 주소)
+// 로컬 Wi-Fi/이더넷 IP 자동 감지 (모바일 기기가 접속해야 할 주소)
+// 가상 어댑터(WSL, VMware, vEthernet 등)를 건너뛰고 물리 랜카드 IP만 반환.
 function getLocalIP() {
+  const VIRTUAL_NAMES = ["vethernet", "wsl", "vmware", "virtualbox", "virtual", "hyper-v", "bluetooth", "tap", "tun", "docker", "loopback"];
+  const PREFERRED_NAMES = ["wi-fi", "wifi", "wlan", "wireless", "ethernet", "이더넷", "local area connection", "lan"];
+
   const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name]) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        // 192.168.x.x 또는 10.x.x.x 대역 우선
-        if (iface.address.startsWith("192.168.") || iface.address.startsWith("10.")) {
-          return iface.address;
-        }
-      }
+  const candidates = [];
+
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    const nameLower = name.toLowerCase();
+    // 가상/루프백 어댑터 제외
+    if (VIRTUAL_NAMES.some((k) => nameLower.includes(k))) continue;
+
+    for (const iface of addrs) {
+      if (iface.family !== "IPv4" || iface.internal) continue;
+      // 사설 IP 대역만 허용 (172.x.x.x는 WSL2 대역으로 제외)
+      const isPrivate =
+        iface.address.startsWith("192.168.") ||
+        iface.address.startsWith("10.");
+      if (!isPrivate) continue;
+
+      const preferred = PREFERRED_NAMES.some((k) => nameLower.includes(k));
+      candidates.push({ ip: iface.address, preferred, name });
     }
   }
-  return "127.0.0.1";
+
+  if (candidates.length === 0) return "127.0.0.1";
+
+  // 물리 Wi-Fi/이더넷 어댑터 우선
+  candidates.sort((a, b) => (b.preferred ? 1 : 0) - (a.preferred ? 1 : 0));
+  const chosen = candidates[0];
+  console.log(`[start-all] 로컬 IP 선택: ${chosen.ip} (어댑터: "${chosen.name}")`);
+  if (candidates.length > 1) {
+    console.log(`[start-all] 후보 IP 목록: ${candidates.map((c) => `${c.ip}(${c.name})`).join(", ")}`);
+  }
+  return chosen.ip;
 }
 const LOCAL_IP = getLocalIP();
 
@@ -63,6 +86,64 @@ function loadDotEnv(envFile) {
 const dotEnvVars = loadDotEnv(".env");
 console.log(`[start-all] .env 로드: ${Object.keys(dotEnvVars).length}개 변수`);
 
+/**
+ * 지정한 포트를 점유 중인 프로세스를 강제 종료한다.
+ * - Windows : netstat -ano + taskkill /PID /F
+ * - Linux/Mac: fuser / lsof + kill -9
+ * 이미 비어 있으면 조용히 넘어간다.
+ */
+function killPort(port) {
+  if (process.platform === "win32") {
+    let pids;
+    try {
+      // netstat -ano | findstr :PORT — LISTENING 상태의 PID 추출
+      const raw = execSync(`netstat -ano | findstr :${port}`, {
+        encoding: "utf8", timeout: 5000,
+      });
+      pids = new Set(
+        raw.split("\n")
+          .filter((l) => l.includes("LISTENING"))
+          .map((l) => l.trim().split(/\s+/).pop())
+          .filter((p) => p && /^\d+$/.test(p) && p !== "0")
+      );
+    } catch {
+      // findstr이 아무것도 못 찾으면 에러 발생 → 포트 비어있음
+      console.log(`[start-all] 포트 ${port} 비어있음 — 스킵`);
+      return;
+    }
+
+    if (pids.size === 0) {
+      console.log(`[start-all] 포트 ${port} 비어있음 — 스킵`);
+      return;
+    }
+
+    console.log(`[start-all] 포트 ${port} 점유 감지 (${pids.size}개 PID) → 강제 종료`);
+    for (const pid of pids) {
+      try {
+        execSync(`taskkill /PID ${pid} /F`, { encoding: "utf8" });
+        console.log(`[start-all] ✅ PID ${pid} 종료 완료 (포트 ${port})`);
+      } catch (e) {
+        console.warn(`[start-all] ⚠ PID ${pid} 종료 실패: ${e.message}`);
+      }
+    }
+  } else {
+    // Linux / Mac
+    try {
+      execSync(`fuser -k ${port}/tcp 2>/dev/null`, { shell: true });
+      console.log(`[start-all] ✅ 포트 ${port} 프로세스 종료 (fuser)`);
+    } catch {
+      try {
+        execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null`, { shell: true });
+        console.log(`[start-all] ✅ 포트 ${port} 프로세스 종료 (lsof)`);
+      } catch {
+        console.log(`[start-all] 포트 ${port} 비어있음 — 스킵`);
+      }
+    }
+  }
+  // 종료 후 500ms 대기 (소켓 TIME_WAIT 해소)
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500); } catch { /* ignore */ }
+}
+
 function color(c, msg) {
   const codes = { cyan: "\x1b[36m", yellow: "\x1b[33m", red: "\x1b[31m", reset: "\x1b[0m" };
   return `${codes[c] ?? ""}${msg}${codes.reset}`;
@@ -89,6 +170,12 @@ function startProcess(label, cmd, args, env = {}) {
   });
   return proc;
 }
+
+// ── 포트 선점 프로세스 강제 종료 ─────────────────────────────
+console.log("[start-all] 포트 선점 프로세스 정리...");
+killPort(NODE_PORT);
+killPort(FASTAPI_PORT);
+console.log("[start-all] 포트 정리 완료 → 서버 시작");
 
 // ── FastAPI (uvicorn) ──────────────────────────────────────────
 const mainPy = path.join(ROOT, "main.py");
