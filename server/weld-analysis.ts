@@ -436,6 +436,35 @@ export function registerWeldAnalysisRoute(app: Express): void {
       const measurementContext = ctxLines.join("\n");
       console.log(`[reanalyze] Ground-Truth ${ctxLines.length}줄 → LLM system 프롬프트 주입`);
 
+      // ── 사용자 과거 진단 이력 조회 (Section 2~5 추세 분석용) ────
+      let userHistory = "";
+      try {
+        const historyRes = await pool.query(
+          `SELECT ai_score, overall_verdict, top3_defects, bead_analysis, timestamp
+           FROM weld_results
+           WHERE user_id = $1 AND id != $2
+           ORDER BY timestamp ASC
+           LIMIT 10`,
+          [row.user_id, resultId]
+        );
+        if (historyRes.rows.length > 0) {
+          userHistory = historyRes.rows.map((hr: any, i: number) => {
+            const date = new Date(Number(hr.timestamp)).toLocaleDateString("ko-KR");
+            const t3 = safeJson(hr.top3_defects) as string[] ?? [];
+            const bd = safeJson(hr.bead_analysis);
+            return (
+              `[${i + 1}회차] ${date} - ` +
+              `AI점수:${hr.ai_score}점(${hr.overall_verdict}) ` +
+              `결함:${t3.length > 0 ? t3.join(",") : "없음"} ` +
+              `비드총점:${bd?.totalScore ?? "N/A"}`
+            );
+          }).join("\n");
+          console.log(`[reanalyze] 과거 이력 ${historyRes.rows.length}건 userHistory 구성`);
+        }
+      } catch (e) {
+        console.warn("[reanalyze] 이력 조회 실패 (무시):", e);
+      }
+
       let adminFeedback = "";
       try {
         const fb = await pool.query(
@@ -457,8 +486,8 @@ export function registerWeldAnalysisRoute(app: Express): void {
         passType:   visionData?.passType   || "",
         aiModel:    aiModel || "gpt",
         adminFeedback,
-        userHistory:        "",             // 이력은 빈값 — ground-truth와 역할 분리
-        measurementContext,                  // system 프롬프트 주입용 Ground-Truth
+        userHistory,                        // Section 2~5: 과거 이력 기반 추세 분석
+        measurementContext,                  // Section 1: 환각 방지용 system 프롬프트 주입
         plateThickness:     "",
         pipeOuterDiameterMm: "",
         language:    "ko",

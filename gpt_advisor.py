@@ -75,6 +75,14 @@ def _build_system_prompt(language_name: str = "Korean", has_side_photo: bool = F
         f"- No empty praise like 'good job'. Concretely point out what improved or worsened.\n"
         f"- Use practical welding terminology that field welders understand, but in "
         f"{language_name}.{multi_view_clause}{height_rule}"
+        f"\n\nCRITICAL SECTION-BY-SECTION RULES:\n"
+        f"## 1 (이번 용접 진단): Use ONLY numbers from [GROUND-TRUTH / 1차 비전 측정] block "
+        f"(if present in system message). Quote exact bead-width, straightness, fillet-leg, "
+        f"throat values verbatim. If a value is not in the block, write '미측정' — NEVER invent. "
+        f"Hallucinating measurements in Section 1 is a critical error.\n"
+        f"## 2-5 (추세/원인/개선/가이드): Analyze [누적 학습 이력] to identify score trends, "
+        f"recurring defect patterns, and personalised practice recommendations. "
+        f"If no history exists, base these sections on Section 1 findings alone.\n"
     )
 
 

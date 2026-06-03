@@ -112,6 +112,59 @@ const statStyles = StyleSheet.create({
   label: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, textAlign: "center" },
 });
 
+// ── 측정 수치 카드 (2단 그리드용) ──────────────────────────────
+type MeasureStatus = "good" | "warn" | "bad" | "info";
+function MeasureCard({
+  icon, label, value, sub, status = "info", score,
+}: {
+  icon: string; label: string; value: string;
+  sub?: string; status?: MeasureStatus; score?: number;
+}) {
+  const c = status === "good" ? Colors.success
+          : status === "warn" ? Colors.warning
+          : status === "bad"  ? Colors.danger
+          : Colors.primary;
+  return (
+    <View style={mcStyles.card}>
+      <View style={mcStyles.header}>
+        <MaterialCommunityIcons name={icon as any} size={14} color={c} />
+        <Text style={mcStyles.label} numberOfLines={1}>{label}</Text>
+      </View>
+      <Text style={[mcStyles.value, { color: c }]}>{value}</Text>
+      {sub != null && <Text style={mcStyles.sub} numberOfLines={1}>{sub}</Text>}
+      {score != null && (
+        <View style={mcStyles.scoreWrap}>
+          <View style={mcStyles.track}>
+            <View style={[mcStyles.fill, { width: `${Math.max(0, Math.min(100, score))}%`, backgroundColor: c }]} />
+          </View>
+          <Text style={[mcStyles.scoreTxt, { color: c }]}>{score}점</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const mcStyles = StyleSheet.create({
+  card: {
+    flex: 1,
+    minWidth: "45%",
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  header: { flexDirection: "row", alignItems: "center", gap: 5 },
+  label: { color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 11, flex: 1 },
+  value: { fontFamily: "Inter_700Bold", fontSize: 16 },
+  sub: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11 },
+  scoreWrap: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  track: { flex: 1, height: 5, backgroundColor: Colors.surface, borderRadius: 3, overflow: "hidden" },
+  fill: { height: "100%", borderRadius: 3 },
+  scoreTxt: { fontFamily: "Inter_700Bold", fontSize: 11, width: 28, textAlign: "right" },
+});
+
 function getDefectDeduction(defect: DefectItem): number | null {
   if (!defect.detected) return 0;
   const name = defect.name.toLowerCase();
@@ -1035,49 +1088,81 @@ export default function DiagnosisScreen() {
                   <ExpoImage source={{ uri: selectedPhotoUri }} style={styles.sectionPhotoThumb} contentFit="cover" />
                 </>
               )}
-              {/* 각장 / 목두께 측정값 */}
-              {filletRows.map(({ label, value }) => (
-                <View key={label} style={styles.filletRow}>
-                  <Text style={styles.filletLabel}>{label}</Text>
-                  <Text style={styles.filletValue}>{value}</Text>
-                </View>
-              ))}
-              {/* 부등각장 */}
-              <View style={styles.filletRow}>
-                <Text style={styles.filletLabel}>부등각장</Text>
-                {fa.unequalLeg.isUnequal ? (
-                  <View style={styles.filletWarnBadge}>
-                    <MaterialCommunityIcons name="alert" size={12} color={Colors.warning} />
-                    <Text style={styles.filletWarnText}>차이 {fa.unequalLeg.difference ?? "?"}mm</Text>
-                  </View>
-                ) : (
-                  <Text style={[styles.filletValue, { color: Colors.success }]}>균등</Text>
-                )}
+              {/* ── 각장 / 목두께 — 2단 그리드 ── */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <MeasureCard
+                  icon="vector-triangle"
+                  label="등각장 (Z)"
+                  value={`${fa.equalLeg}mm`}
+                  sub="기준: 모재두께×0.7 이상"
+                  status="info"
+                />
+                <MeasureCard
+                  icon="arrow-expand-horizontal"
+                  label="비드 표면너비"
+                  value={`${fa.beadWidth}mm`}
+                  status="info"
+                />
               </View>
-              {/* 비드 형상 (볼록/오목/평탄) */}
-              <View style={styles.filletRow}>
-                <Text style={styles.filletLabel}>비드 형상</Text>
-                <Text style={[styles.filletValue, { color: convexColor }]}>
-                  {convexLabel} ({fa.convexity.value_mm}mm)
-                </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <MeasureCard
+                  icon="ray-start-arrow"
+                  label="수직 각장 (Z1)"
+                  value={fa.unequalLeg.z1 != null ? `${fa.unequalLeg.z1}mm` : "-"}
+                  status="info"
+                />
+                <MeasureCard
+                  icon="ray-end-arrow"
+                  label="수평 각장 (Z2)"
+                  value={fa.unequalLeg.z2 != null ? `${fa.unequalLeg.z2}mm` : "-"}
+                  status="info"
+                />
               </View>
-              <Text style={styles.filletNote}>※ 부등각장은 참고용 측정값 (비드 폴리곤 기반)</Text>
-              {/* 직진도 보조 정보 */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <MeasureCard
+                  icon="layers-outline"
+                  label="이론 목두께"
+                  value={`${fa.theoreticalThroat}mm`}
+                  sub="계산값"
+                  status="info"
+                />
+                <MeasureCard
+                  icon="layers"
+                  label="실제 목두께"
+                  value={`${fa.actualThroat}mm`}
+                  sub={fa.actualThroat >= fa.theoreticalThroat * 0.9 ? "정상" : "기준 미달"}
+                  status={fa.actualThroat >= fa.theoreticalThroat * 0.9 ? "good" : "bad"}
+                />
+              </View>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <MeasureCard
+                  icon={fa.convexity.type === "flat" ? "minus" : fa.convexity.type === "convex" ? "arrow-up-bold" : "arrow-down-bold"}
+                  label="비드 형상"
+                  value={convexLabel}
+                  sub={`${fa.convexity.value_mm}mm`}
+                  status={fa.convexity.type === "flat" ? "good" : fa.convexity.type === "convex" ? "warn" : "bad"}
+                />
+                <MeasureCard
+                  icon={fa.unequalLeg.isUnequal ? "alert" : "check-circle"}
+                  label="부등각장"
+                  value={fa.unequalLeg.isUnequal ? `차이 ${fa.unequalLeg.difference ?? "?"}mm` : "균등"}
+                  sub="참고용 (폴리곤 기반)"
+                  status={fa.unequalLeg.isUnequal ? "warn" : "good"}
+                />
+              </View>
+              {/* 직진도 (필릿 포함) */}
               {currentPhotoAnalysis?.beadAnalysis && (() => {
                 const ba = currentPhotoAnalysis.beadAnalysis!;
                 const sc = ba.straightness.score;
-                const c  = scoreColor(sc);
+                const st: MeasureStatus = sc >= 80 ? "good" : sc >= 65 ? "warn" : "bad";
                 return (
-                  <View style={[styles.beadRow, { marginTop: 8 }]}>
-                    <View style={styles.beadRowTop}>
-                      <Text style={styles.beadLabel}>{t("bead_straightness")}</Text>
-                      <Text style={[styles.beadResult, { color: c }]}>{sc}{t("points_suffix")}</Text>
-                    </View>
-                    <Text style={styles.beadMeasure} numberOfLines={2}>{ba.straightness.value}</Text>
-                    <View style={styles.beadProgressTrack}>
-                      <View style={[styles.beadProgressFill, { width: `${Math.max(0, Math.min(100, sc))}%`, backgroundColor: c }]} />
-                    </View>
-                  </View>
+                  <MeasureCard
+                    icon="ray-start-end"
+                    label={t("bead_straightness")}
+                    value={ba.straightness.value}
+                    score={sc}
+                    status={st}
+                  />
                 );
               })()}
             </SectionCard>
@@ -1107,49 +1192,64 @@ export default function DiagnosisScreen() {
                 <ExpoImage source={{ uri: selectedPhotoUri }} style={styles.sectionPhotoThumb} contentFit="cover" />
               </>
             )}
-            {/* 레이저 높이 최대/최소 (맞대기 전용) */}
-            {result.laserAnalysis?.status === "success" && (
-              <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
-                <StatCard label="높이 최대" value={`${result.laserAnalysis.beadHeightMax.toFixed(2)}mm`} />
-                <StatCard label="높이 최소" value={`${result.laserAnalysis.beadHeightMin.toFixed(2)}mm`} />
-                <StatCard label="높이 균일성" value={`편차 ${result.laserAnalysis.heightVariance.toFixed(2)}mm`} />
-              </View>
-            )}
-            {currentPhotoAnalysis?.beadAnalysis ? (
-              <>
-                {(() => {
-                  const ba = currentPhotoAnalysis.beadAnalysis!;
-                  const beadItems: Array<{ label: string; data: { value: string; score: number } }> = [
-                    { label: t("bead_width"),        data: ba.width },
-                    { label: t("bead_straightness"), data: ba.straightness },
-                  ];
-                  if (ba.height && !result.laserAnalysis) {
-                    beadItems.push({ label: t("bead_height"), data: ba.height });
-                  }
-                  const scoreColor = (s: number) =>
-                    s >= 90 ? Colors.primary : s >= 80 ? Colors.success : s >= 65 ? Colors.warning : Colors.danger;
-                  return (
-                    <>
-                      {beadItems.map(({ label, data }) => {
-                        const color = scoreColor(data.score);
-                        return (
-                          <View key={label} style={styles.beadRow}>
-                            <View style={styles.beadRowTop}>
-                              <Text style={styles.beadLabel}>{label}</Text>
-                              <Text style={[styles.beadResult, { color }]}>{data.score}{t("points_suffix")}</Text>
-                            </View>
-                            <Text style={styles.beadMeasure} numberOfLines={2}>{data.value}</Text>
-                            <View style={styles.beadProgressTrack}>
-                              <View style={[styles.beadProgressFill, { width: `${Math.max(0, Math.min(100, data.score))}%`, backgroundColor: color }]} />
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-              </>
-            ) : (
+            {currentPhotoAnalysis?.beadAnalysis ? (() => {
+              const ba = currentPhotoAnalysis.beadAnalysis!;
+              const st = (s: number): MeasureStatus =>
+                s >= 90 ? "good" : s >= 78 ? "good" : s >= 62 ? "warn" : "bad";
+              return (
+                <>
+                  {/* 비드폭 + 직진도 */}
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <MeasureCard
+                      icon="arrow-expand-horizontal"
+                      label={t("bead_width")}
+                      value={ba.width.value}
+                      score={ba.width.score}
+                      status={st(ba.width.score)}
+                    />
+                    <MeasureCard
+                      icon="ray-start-end"
+                      label={t("bead_straightness")}
+                      value={ba.straightness.value}
+                      score={ba.straightness.score}
+                      status={st(ba.straightness.score)}
+                    />
+                  </View>
+                  {/* 비드 높이 (레이저 없을 때만) */}
+                  {ba.height && !result.laserAnalysis && (
+                    <MeasureCard
+                      icon="arrow-expand-vertical"
+                      label={t("bead_height")}
+                      value={ba.height.value}
+                      score={ba.height.score}
+                      status={st(ba.height.score)}
+                    />
+                  )}
+                  {/* 레이저 높이 (있을 때) */}
+                  {result.laserAnalysis?.status === "success" && (() => {
+                    const la = result.laserAnalysis!;
+                    const hDiff = la.beadHeightMax - la.beadHeightMin;
+                    return (
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <MeasureCard
+                          icon="arrow-collapse-up"
+                          label="레이저 최대높이"
+                          value={`${la.beadHeightMax.toFixed(2)}mm`}
+                          status="info"
+                        />
+                        <MeasureCard
+                          icon="arrow-collapse-down"
+                          label="레이저 최소높이"
+                          value={`${la.beadHeightMin.toFixed(2)}mm`}
+                          sub={`편차 ${hDiff.toFixed(2)}mm`}
+                          status={hDiff <= 1.0 ? "good" : hDiff <= 2.0 ? "warn" : "bad"}
+                        />
+                      </View>
+                    );
+                  })()}
+                </>
+              );
+            })() : (
               <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 13, textAlign: "center", paddingVertical: 12, paddingHorizontal: 8, lineHeight: 19 }}>
                 {currentPhotoAnalysis?.analysisStatus === "no_bead_detected"
                   ? (selectedPhotoView === "side" ? t("diag_sideNotDetected") : t("diag_backNotDetected"))
