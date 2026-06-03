@@ -35,6 +35,24 @@ print(f"[Init] Roboflow model = '{ROBOFLOW_MODEL}' | marker = {REAL_MARKER_SIZE_
 openai_client    = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
 anthropic_client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
+
+def convert_numpy_types(obj):
+    """NumPy 타입을 JSON 직렬화 가능한 Python 기본 타입으로 재귀 변환."""
+    if isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(v) for v in obj]
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return [convert_numpy_types(v) for v in obj.tolist()]
+    return obj
+
+
 # ==========================================
 # [공통] Roboflow 원본 클래스명 → 한국어 매핑
 # (대소문자·띄어쓰기 포함 원본 그대로 사용)
@@ -952,7 +970,7 @@ async def analyze_welding_full(
             # 이면 사진은 업로드됐지만 비드/결함을 식별하지 못함
             photo_analyses["back"] = _empty_photo_analysis()
 
-    return {
+    result = {
         # 프론트엔드 호환 필드 — 최상위는 정면 데이터
         "aiScore":             weld_data["final_score"],
         "overallVerdict":      weld_data["is_pass"],
@@ -982,3 +1000,4 @@ async def analyze_welding_full(
         # 필렛 분석 (is_fillet=true 일 때만 non-null)
         "filletAnalysis": fillet_result,
     }
+    return convert_numpy_types(result)
