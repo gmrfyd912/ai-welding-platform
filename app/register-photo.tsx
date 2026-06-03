@@ -363,27 +363,34 @@ export default function RegisterPhotoScreen() {
       }).catch(() => {});
     } catch (err: any) {
       stageTimers.forEach(clearTimeout);
-      // ── 상세 에러 로깅 (터미널에서 근본 원인 파악용) ──────────
-      console.error("=== API 에러 상세 ===");
-      console.error("에러 타입 :", err?.name ?? "(없음)");
-      console.error("에러 메시지:", err?.message ?? "(없음)");
-      console.error("HTTP 상태 :", err?.status ?? err?.response?.status ?? "(없음)");
-      console.error("응답 데이터:", err?.response?.data ?? err?.body ?? "(없음)");
-      console.error("API URL   :", getApiUrl());
-      if (err?.name === "AbortError") {
-        console.error("→ 서버 응답 타임아웃 (네트워크 또는 FastAPI 느림)");
-      } else if (/network request failed|fetch failed|econnrefused/i.test(err?.message ?? "")) {
-        console.error("→ 네트워크 연결 실패 — 서버가 실행 중인지, IP/포트가 맞는지 확인");
-      } else if (/5\d\d/.test(String(err?.status ?? ""))) {
-        console.error("→ 서버 500번대 오류 — server/weld-analysis.ts 로그 확인");
+
+      // 디버깅용 로그 — console.warn 사용으로 Expo RedBox 방지
+      const apiUrl = getApiUrl();
+      const errType = err?.name ?? "Unknown";
+      const errMsg  = err?.message ?? "";
+      const httpStatus = err?.status ?? err?.response?.status ?? "";
+      console.warn("[analyze] 에러 타입:", errType);
+      console.warn("[analyze] 에러 메시지:", errMsg);
+      if (httpStatus) console.warn("[analyze] HTTP 상태:", httpStatus);
+      console.warn("[analyze] API URL:", apiUrl);
+      if (errType === "AbortError") {
+        console.warn("[analyze] 원인: 서버 응답 타임아웃 (네트워크 또는 FastAPI 처리 지연)");
+      } else if (/network request failed|fetch failed|econnrefused/i.test(errMsg)) {
+        console.warn("[analyze] 원인: 네트워크 연결 실패 — 서버 IP/포트 확인 필요");
+      } else if (httpStatus >= 500) {
+        console.warn("[analyze] 원인: 서버 500번대 오류 — server/weld-analysis.ts 로그 확인");
       }
-      console.error("======================");
-      // FastAPI/서버에서 받은 사용자 친화 메시지가 있으면 그대로 표시
-      const msg = (err?.message && typeof err.message === "string" && err.message.length < 300)
-        ? err.message
-        : t("ai_analysisError");
-      const looksLikePhotoIssue = /비드|마커|사진|선명|업로드|bead|marker|photo|upload/i.test(msg);
-      Alert.alert(looksLikePhotoIssue ? t("photo_reuploadTitle") : t("analysis_errorTitle"), msg);
+
+      // 사용자에게 보여줄 메시지 안전 추출
+      const userMsg =
+        (typeof errMsg === "string" && errMsg.length > 0 && errMsg.length < 300)
+          ? errMsg
+          : t("ai_analysisError");
+      const looksLikePhotoIssue = /비드|마커|사진|선명|업로드|bead|marker|photo|upload/i.test(userMsg);
+      Alert.alert(
+        looksLikePhotoIssue ? t("photo_reuploadTitle") : t("analysis_errorTitle"),
+        userMsg,
+      );
     } finally {
       stageTimers.forEach(clearTimeout);
       setAnalysisStage("");
