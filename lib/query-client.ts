@@ -1,22 +1,50 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+const PRODUCTION_URL = "https://ai-welding-platform.onrender.com";
+
 /**
  * Gets the base URL for the Express API server.
- * EXPO_PUBLIC_DOMAIN may include an explicit port (e.g. "domain:5000").
- * On Replit, the dev domain already proxies to the correct port via port 443,
- * so we strip the explicit port to ensure phones connect correctly.
+ *
+ * 우선순위:
+ * 1. EXPO_PUBLIC_DOMAIN 환경 변수 (명시적 설정)
+ * 2. 개발(DEV) 모드 + Expo 호스트 → PC 로컬 IP:5000 자동 감지
+ *    (같은 Wi-Fi의 모바일 기기가 PC 서버에 자동 연결)
+ * 3. 기본값: Render 프로덕션 서버
  */
 export function getApiUrl(): string {
-  let host = process.env.EXPO_PUBLIC_DOMAIN;
-  if (!host) {
-    throw new Error("EXPO_PUBLIC_DOMAIN is not set");
+  const configured = process.env.EXPO_PUBLIC_DOMAIN;
+
+  // 명시 설정이 있고 프로덕션 URL이 아닌 경우 그대로 사용
+  if (configured && !configured.includes("onrender.com")) {
+    const url = configured.startsWith("http") ? configured : `http://${configured}`;
+    return url.endsWith("/") ? url : `${url}/`;
   }
-  // 이미 http:// 또는 https://가 포함된 경우 그대로 사용
-  if (host.startsWith("http://") || host.startsWith("https://")) {
-    return host.endsWith("/") ? host : `${host}/`;
+
+  // DEV 모드: Expo Constants.expoConfig.hostUri에서 PC 로컬 IP를 자동 감지
+  if (__DEV__) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Constants = require("expo-constants").default;
+      const hostUri: string | undefined = Constants?.expoConfig?.hostUri;
+      if (hostUri) {
+        // hostUri 예: "192.168.0.11:8081" (Expo Metro 포트)
+        // Express 서버는 5000번 포트에서 실행
+        const ip = hostUri.split(":")[0];
+        if (ip && ip !== "localhost" && ip !== "127.0.0.1") {
+          const devUrl = `http://${ip}:5000/`;
+          console.log(`[API] DEV 모드 — 로컬 서버 자동 감지: ${devUrl}`);
+          return devUrl;
+        }
+      }
+    } catch {
+      // expo-constants 미사용 환경에서는 폴백
+    }
   }
-  return `http://${host}/`;
+
+  // 프로덕션 또는 감지 실패 → Render 서버
+  const fallback = configured || PRODUCTION_URL;
+  return fallback.endsWith("/") ? fallback : `${fallback}/`;
 }
 
 export function apiUrl(path: string): string {

@@ -5,7 +5,8 @@ import pool from "./db";
 const largeBodyParser = express.json({ limit: "30mb" });
 
 // FASTAPI_URL 환경 변수로 FastAPI 주소를 외부 구성 가능 (Render 등 배포 환경 대응)
-const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://localhost:8080";
+// 기본값을 127.0.0.1로 사용 — Node 18+ 에서 localhost가 IPv6(::1)로 해석될 때 ECONNREFUSED 방지
+const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
 console.log(`[WeldAnalysis] FastAPI endpoint = ${FASTAPI_BASE}`);
 
@@ -171,9 +172,9 @@ export function registerWeldAnalysisRoute(app: Express): void {
     const {
       photos, imageBase64,
       process, posture, material,
-      selfScore, beadType, passType, aiModel,
+      beadType, passType, aiModel,
       previousResultsSummary, plateThickness, pipeOuterDiameterMm,
-      language, analysisMode,
+      language,
       isMockLaser, isFillet, hasLaser, laserAngleDeg,
     } = req.body;
 

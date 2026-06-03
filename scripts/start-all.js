@@ -17,9 +17,27 @@ const { spawn } = require("child_process");
 const path      = require("path");
 const fs        = require("fs");
 
+const os   = require("os");
 const ROOT = path.resolve(__dirname, "..");
 const FASTAPI_PORT = process.env.FASTAPI_PORT ?? "8080";
 const NODE_PORT    = process.env.PORT          ?? "5000";
+
+// 로컬 Wi-Fi IP 자동 감지 (모바일 기기가 접속해야 할 주소)
+function getLocalIP() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        // 192.168.x.x 또는 10.x.x.x 대역 우선
+        if (iface.address.startsWith("192.168.") || iface.address.startsWith("10.")) {
+          return iface.address;
+        }
+      }
+    }
+  }
+  return "127.0.0.1";
+}
+const LOCAL_IP = getLocalIP();
 
 // .env 파일 파싱 → FastAPI 프로세스에 환경 변수로 전달
 function loadDotEnv(envFile) {
@@ -112,7 +130,7 @@ const nodeServer = startProcess(
   "Node",
   process.platform === "win32" ? "npx.cmd" : "npx",
   ["cross-env", "NODE_ENV=development", "tsx", "--env-file=.env", "server/index.ts"],
-  { PORT: NODE_PORT, FASTAPI_URL: `http://localhost:${FASTAPI_PORT}` }
+  { PORT: NODE_PORT, FASTAPI_URL: `http://127.0.0.1:${FASTAPI_PORT}` }
 );
 
 // ── 종료 처리 ──────────────────────────────────────────────────
@@ -126,9 +144,15 @@ process.on("SIGINT",  shutdown);
 process.on("SIGTERM", shutdown);
 
 console.log(color("cyan", `
-┌─────────────────────────────────────────────────┐
-│  🔧 AI 용접 진단 — 개발 서버 시작                  │
-│  FastAPI  → http://localhost:${FASTAPI_PORT}           │
-│  Node.js  → http://localhost:${NODE_PORT}           │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  🔧 AI 용접 진단 — 개발 서버 시작                          │
+│                                                          │
+│  FastAPI  → http://127.0.0.1:${FASTAPI_PORT}                   │
+│  Node.js  → http://127.0.0.1:${NODE_PORT}                   │
+│                                                          │
+│  📱 모바일(Expo Go) 접속 주소:                            │
+│     http://${LOCAL_IP}:${NODE_PORT}                         │
+│                                                          │
+│  Expo 시작: EXPO_PUBLIC_DOMAIN=http://${LOCAL_IP}:${NODE_PORT} npx expo start │
+└──────────────────────────────────────────────────────────┘
 `));
