@@ -21,6 +21,30 @@ const ROOT = path.resolve(__dirname, "..");
 const FASTAPI_PORT = process.env.FASTAPI_PORT ?? "8080";
 const NODE_PORT    = process.env.PORT          ?? "5000";
 
+// .env 파일 파싱 → FastAPI 프로세스에 환경 변수로 전달
+function loadDotEnv(envFile) {
+  const envPath = path.join(ROOT, envFile);
+  if (!fs.existsSync(envPath)) return {};
+  const vars = {};
+  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx < 1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    let val = trimmed.slice(eqIdx + 1).trim();
+    // 따옴표 제거
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    vars[key] = val;
+  }
+  return vars;
+}
+const dotEnvVars = loadDotEnv(".env");
+console.log(`[start-all] .env 로드: ${Object.keys(dotEnvVars).length}개 변수`);
+
 function color(c, msg) {
   const codes = { cyan: "\x1b[36m", yellow: "\x1b[33m", red: "\x1b[31m", reset: "\x1b[0m" };
   return `${codes[c] ?? ""}${msg}${codes.reset}`;
@@ -55,11 +79,32 @@ if (!fs.existsSync(mainPy)) {
   process.exit(1);
 }
 
+// uvicorn 실행 파일 탐색 (우선순위 순)
+const UVICORN_CANDIDATES = [
+  process.env.UVICORN_PATH,                                                          // 환경 변수 우선
+  path.join(process.env.APPDATA ?? "", "Python", "Python313", "Scripts", "uvicorn.exe"), // Windows 사용자 Python
+  path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python313", "Scripts", "uvicorn.exe"),
+  "/usr/local/bin/uvicorn",                                                           // Linux/Mac
+  "/usr/bin/uvicorn",
+  "uvicorn",                                                                          // PATH 폴백
+];
+const uvicornCmd = UVICORN_CANDIDATES.find(
+  (p) => p && (p === "uvicorn" || fs.existsSync(p))
+) ?? "uvicorn";
+console.log(color("cyan", `[FastAPI] uvicorn: ${uvicornCmd}`));
+
+// PYTHONPATH: uvicorn의 site-packages 경로 추가 (openai/anthropic 포함)
+const EXTRA_PYTHONPATH = path.join(process.env.APPDATA ?? "", "Python", "Python313", "site-packages");
+
 const fastapi = startProcess(
   "FastAPI",
-  "uvicorn",
+  uvicornCmd,
   ["main:app", "--host", "0.0.0.0", "--port", FASTAPI_PORT, "--reload"],
-  { FASTAPI_PORT }
+  {
+    ...dotEnvVars,                                                         // .env 전체 주입
+    FASTAPI_PORT,
+    PYTHONPATH: `${EXTRA_PYTHONPATH}${path.delimiter}${process.env.PYTHONPATH ?? ""}`,
+  }
 );
 
 // ── Node.js (tsx dev) ──────────────────────────────────────────
