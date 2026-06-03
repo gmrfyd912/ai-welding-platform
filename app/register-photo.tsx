@@ -117,11 +117,9 @@ export default function RegisterPhotoScreen() {
   const [showPhotoGuide, setShowPhotoGuide] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStage, setAnalysisStage] = useState<string>("");
-  const [selectedAI, setSelectedAI] = useState<"gpt-4o" | "claude-sonnet">("gpt-4o");
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
-  const [analysisMode, setAnalysisMode] = useState<"quick" | "ai">("quick");
   const [beadType, setBeadType] = useState<"위빙 비드" | "스트레이트 비드">("위빙 비드");
   const [passType, setPassType] = useState<"싱글 패스" | "멀티 패스">("싱글 패스");
   const [plateThickness, setPlateThickness] = useState("");
@@ -237,9 +235,7 @@ export default function RegisterPhotoScreen() {
 
       // 서버 처리 중에는 streaming progress가 없으므로 단계별 텍스트만 시간차로 갱신
       stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_detecting")), 1500));
-      stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_measuring")), 6000));
-      stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_aiAnalyzing").replace("{model}", selectedAI === "claude-sonnet" ? "Claude" : "GPT-4o")), 10000));
-      stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_writingReport")), 22000));
+      stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_measuring")), 5000));
 
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -253,10 +249,10 @@ export default function RegisterPhotoScreen() {
           previousResultsSummary,
           pipeOuterDiameterMm: material.includes("배관") ? (pipeOuterDiameter.trim() || undefined) : undefined,
           language: lang,
-          aiModel: selectedAI,
+          aiModel: "gpt-4o",
           isFillet,
           hasLaser,
-          analysisMode,
+          analysisMode: "quick",
           beadType,
           passType,
           plateThickness: plateThickness.trim() || undefined,
@@ -688,45 +684,6 @@ export default function RegisterPhotoScreen() {
           </Text>
         </View>
 
-        {/* 분석 모드 + AI 모델 선택 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>분석 모드</Text>
-          <View style={styles.modeSelector}>
-            <Pressable
-              style={[styles.modeOption, analysisMode === "quick" && styles.modeOptionActive]}
-              onPress={() => { setAnalysisMode("quick"); Haptics.selectionAsync(); }}
-            >
-              <Ionicons name="flash-outline" size={14} color={analysisMode === "quick" ? Colors.primary : Colors.textMuted} />
-              <Text style={[styles.modeOptionText, analysisMode === "quick" && styles.modeOptionTextActive]}>빠른 측정</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.modeOption, analysisMode === "ai" && styles.modeOptionActive]}
-              onPress={() => { setAnalysisMode("ai"); Haptics.selectionAsync(); }}
-            >
-              <MaterialCommunityIcons name="robot-outline" size={14} color={analysisMode === "ai" ? Colors.primary : Colors.textMuted} />
-              <Text style={[styles.modeOptionText, analysisMode === "ai" && styles.modeOptionTextActive]}>AI 종합 분석</Text>
-            </Pressable>
-          </View>
-          {analysisMode === "ai" && (
-            <View style={styles.aiSelector}>
-              <Pressable
-                style={[styles.aiOption, selectedAI === "gpt-4o" && styles.aiOptionActive]}
-                onPress={() => setSelectedAI("gpt-4o")}
-              >
-                <Text style={[styles.aiOptionText, selectedAI === "gpt-4o" && styles.aiOptionTextActive]}>GPT-4o</Text>
-                <Text style={[styles.aiOptionSub, selectedAI === "gpt-4o" && styles.aiOptionSubActive]}>OpenAI</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.aiOption, selectedAI === "claude-sonnet" && styles.aiOptionActive]}
-                onPress={() => setSelectedAI("claude-sonnet")}
-              >
-                <Text style={[styles.aiOptionText, selectedAI === "claude-sonnet" && styles.aiOptionTextActive]}>Claude Sonnet</Text>
-                <Text style={[styles.aiOptionSub, selectedAI === "claude-sonnet" && styles.aiOptionSubActive]}>Anthropic</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-
         {/* 개발자 전용 Mock 테스트 — DEV 빌드에서만 표시 */}
         {__DEV__ && (
           <View style={styles.devSection}>
@@ -785,8 +742,8 @@ export default function RegisterPhotoScreen() {
               </View>
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <MaterialCommunityIcons name="robot-outline" size={20} color="#fff" />
-                <Text style={styles.submitBtnText}>{t("reg_submitBtn")}</Text>
+                <Ionicons name="flash" size={20} color="#fff" />
+                <Text style={styles.submitBtnText}>분석하기</Text>
               </View>
             )}
           </LinearGradient>

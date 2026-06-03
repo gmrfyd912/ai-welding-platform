@@ -473,6 +473,7 @@ export default function DiagnosisScreen() {
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   const [showScoringInfo, setShowScoringInfo] = useState(false);
   const [isSharingPDF, setIsSharingPDF] = useState(false);
+  const [reanalyzeModel, setReanalyzeModel] = useState<"gpt-4o" | "claude-sonnet">("gpt-4o");
 
   const zoomScale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -822,7 +823,7 @@ export default function DiagnosisScreen() {
       const resp = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resultId: result.id }),
+        body: JSON.stringify({ resultId: result.id, aiModel: reanalyzeModel }),
       });
       if (resp.ok) {
         await refreshResults();
@@ -1277,10 +1278,39 @@ export default function DiagnosisScreen() {
         </SectionCard>
 
         {isQuickMode ? (
-          <SectionCard title="빠른 측정 모드" icon="flash-outline">
+          <SectionCard title="비전 측정 완료" icon="flash-outline">
             <Text style={{ color: Colors.textSecondary, fontFamily: "Inter_400Regular", fontSize: 14, lineHeight: 22 }}>
-              빠른 측정 모드로 분석된 결과입니다.{"\n"}AI 종합 분석 리포트와 개선 제안을 보려면 아래에서 재분석을 실행하세요.
+              비드 치수 및 결함 탐지가 완료되었습니다.{"\n"}
+              AI 전문가 종합 진단 리포트가 필요하면 아래에서 실행하세요.
             </Text>
+
+            {/* AI 모델 선택 */}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {(["gpt-4o", "claude-sonnet"] as const).map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => setReanalyzeModel(m)}
+                  style={{
+                    flex: 1, paddingVertical: 8, borderRadius: 10,
+                    borderWidth: 1.5,
+                    borderColor: reanalyzeModel === m ? Colors.primary : Colors.border,
+                    backgroundColor: reanalyzeModel === m ? Colors.primary + "15" : Colors.card,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{
+                    fontFamily: "Inter_600SemiBold", fontSize: 13,
+                    color: reanalyzeModel === m ? Colors.primary : Colors.textMuted,
+                  }}>
+                    {m === "gpt-4o" ? "GPT-4o" : "Claude Sonnet"}
+                  </Text>
+                  <Text style={{ fontFamily: "Inter_400Regular", fontSize: 10, color: Colors.textMuted, marginTop: 1 }}>
+                    {m === "gpt-4o" ? "OpenAI" : "Anthropic"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
             <Pressable
               onPress={handleReanalyze}
               disabled={isReanalyzing}
