@@ -22,6 +22,9 @@ ROBOFLOW_API_KEY  = os.environ.get("ROBOFLOW_API_KEY", "")
 # ROBOFLOW_MODEL_ID는 "project/version" 형태 (예: ai_welding_diagnosis/1)
 # URL: https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key=...
 ROBOFLOW_MODEL    = os.environ.get("ROBOFLOW_MODEL_ID", "weld-defect/3")
+# 탐지율 튜닝: confidence 20% (미세 결함 포착), overlap 30% (중복 박스 병합)
+ROBOFLOW_CONF     = int(os.environ.get("ROBOFLOW_CONF", "20"))
+ROBOFLOW_OVERLAP  = int(os.environ.get("ROBOFLOW_OVERLAP", "30"))
 REAL_MARKER_SIZE_MM = 30.0
 
 # 시작 시 어떤 모델/마커 크기로 동작 중인지 콘솔에 명시
@@ -386,7 +389,7 @@ async def analyze_weld_legacy(
         image_bytes = await file.read()
         async with httpx.AsyncClient(timeout=30) as client:
             robo_resp = await client.post(
-                f"https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key={ROBOFLOW_API_KEY}",
+                f"https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key={ROBOFLOW_API_KEY}&confidence={ROBOFLOW_CONF}&overlap={ROBOFLOW_OVERLAP}",
                 files={"file": ("image.jpg", image_bytes, "image/jpeg")},
             )
         if robo_resp.status_code != 200:
@@ -479,7 +482,7 @@ async def _call_roboflow(image_bytes: bytes, label: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=30) as http_client:
             robo_resp = await http_client.post(
-                f"https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key={ROBOFLOW_API_KEY}",
+                f"https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key={ROBOFLOW_API_KEY}&confidence={ROBOFLOW_CONF}&overlap={ROBOFLOW_OVERLAP}",
                 files={"file": ("image.jpg", image_bytes, "image/jpeg")},
             )
         if robo_resp.status_code == 200:

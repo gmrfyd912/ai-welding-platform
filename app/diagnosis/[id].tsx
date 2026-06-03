@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   Pressable,
+  ScrollView,
   Image,
   Dimensions,
   Platform,
@@ -470,6 +471,8 @@ export default function DiagnosisScreen() {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [selectedPhotoView, setSelectedPhotoView] = useState<PhotoView>("front");
   const [isReanalyzing, setIsReanalyzing] = useState(false);
+  const [showScoringInfo, setShowScoringInfo] = useState(false);
+  const [isSharingPDF, setIsSharingPDF] = useState(false);
 
   const zoomScale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -833,6 +836,19 @@ export default function DiagnosisScreen() {
     }
   };
 
+  const handleSharePDF = async () => {
+    if (isSharingPDF) return;
+    setIsSharingPDF(true);
+    try {
+      const { generateAndSharePDF } = await import("@/components/ReportPDFGenerator");
+      await generateAndSharePDF(result);
+    } catch (e: any) {
+      Alert.alert("공유 실패", e?.message ?? "PDF 생성 중 오류가 발생했습니다.");
+    } finally {
+      setIsSharingPDF(false);
+    }
+  };
+
   return (
     <View style={[styles.container]}>
       <LinearGradient colors={[Colors.bg, "#0D1528", Colors.bg]} style={StyleSheet.absoluteFill} />
@@ -848,24 +864,34 @@ export default function DiagnosisScreen() {
           <Ionicons name="chevron-back" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.navTitle}>{result.userName}</Text>
-        {isAdmin ? (
-          <View style={{ flexDirection: "row", gap: 6 }}>
-            <Pressable
-              onPress={() => { Haptics.selectionAsync(); setShowFeedbackModal(true); }}
-              style={[styles.adminDeleteNavBtn, { backgroundColor: Colors.primary + "22", borderColor: Colors.primary + "66" }]}
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={16} color={Colors.primary} />
-            </Pressable>
-            <Pressable
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); handleAdminDelete(); }}
-              style={styles.adminDeleteNavBtn}
-            >
-              <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-            </Pressable>
-          </View>
-        ) : (
-          <View style={{ width: 40 }} />
-        )}
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          {/* 공유 버튼 (관리자/일반 공통) */}
+          <Pressable
+            onPress={handleSharePDF}
+            disabled={isSharingPDF}
+            style={[styles.adminDeleteNavBtn, { backgroundColor: Colors.primary + "22", borderColor: Colors.primary + "66", opacity: isSharingPDF ? 0.5 : 1 }]}
+          >
+            {isSharingPDF
+              ? <ActivityIndicator size="small" color={Colors.primary} />
+              : <Ionicons name="share-outline" size={18} color={Colors.primary} />}
+          </Pressable>
+          {isAdmin && (
+            <>
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); setShowFeedbackModal(true); }}
+                style={[styles.adminDeleteNavBtn, { backgroundColor: Colors.primary + "22", borderColor: Colors.primary + "66" }]}
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={16} color={Colors.primary} />
+              </Pressable>
+              <Pressable
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); handleAdminDelete(); }}
+                style={styles.adminDeleteNavBtn}
+              >
+                <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+              </Pressable>
+            </>
+          )}
+        </View>
       </View>
 
       <KeyboardAwareScrollView
@@ -933,7 +959,16 @@ export default function DiagnosisScreen() {
             { label: "실제 목두께", value: `${fa.actualThroat}mm` },
           ];
           return (
-            <SectionCard title="필릿 비드 분석" icon="set-square">
+            <SectionCard
+              title="필릿 비드 분석"
+              icon="set-square"
+              badge={
+                <Pressable onPress={() => setShowScoringInfo(true)} style={styles.infoBtn} hitSlop={8}>
+                  <Ionicons name="information-circle-outline" size={18} color={Colors.primary} />
+                  <Text style={styles.infoBtnText}>평가 방식</Text>
+                </Pressable>
+              }
+            >
               {hasMultiplePhotos && (
                 <>
                   <PhotoTabBar tabs={photoTabs} selected={selectedPhotoView} onSelect={(k) => { setSelectedPhotoView(k); setImgNaturalSize(null); setImgRenderedSize(null); }} />
@@ -992,11 +1027,19 @@ export default function DiagnosisScreen() {
           <SectionCard
             title={t("diag_beadAnalysis")}
             icon="ruler-square"
-            badge={currentPhotoAnalysis?.beadAnalysis ? (
-              <Text style={{ color: getGradeColor(currentPhotoAnalysis.beadAnalysis.totalScore), fontFamily: "Inter_700Bold", fontSize: 15 }}>
-                {currentPhotoAnalysis.beadAnalysis.totalScore}{t("points_suffix")}
-              </Text>
-            ) : undefined}
+            badge={
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {currentPhotoAnalysis?.beadAnalysis && (
+                <Text style={{ color: getGradeColor(currentPhotoAnalysis.beadAnalysis.totalScore), fontFamily: "Inter_700Bold", fontSize: 15 }}>
+                  {currentPhotoAnalysis.beadAnalysis.totalScore}{t("points_suffix")}
+                </Text>
+              )}
+              <Pressable onPress={() => setShowScoringInfo(true)} style={styles.infoBtn} hitSlop={8}>
+                <Ionicons name="information-circle-outline" size={18} color={Colors.primary} />
+                <Text style={styles.infoBtnText}>평가 방식</Text>
+              </Pressable>
+            </View>
+          }
           >
             {hasMultiplePhotos && (
               <>
@@ -1710,6 +1753,84 @@ export default function DiagnosisScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── 평가 방식 안내 모달 ── */}
+      <Modal visible={showScoringInfo} transparent animationType="slide" onRequestClose={() => setShowScoringInfo(false)}>
+        <View style={styles.fbOverlay}>
+          <View style={[styles.fbModal, { maxHeight: "85%" }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Ionicons name="information-circle" size={22} color={Colors.primary} />
+              <Text style={{ color: Colors.text, fontFamily: "Inter_700Bold", fontSize: 17, flex: 1 }}>
+                평가 방식 안내
+              </Text>
+              <Pressable onPress={() => setShowScoringInfo(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 520 }}>
+              <Text style={styles.scoringFormula}>최종 점수 = 비드 형상 점수 − 결함 감점</Text>
+
+              {/* 맞대기 채점 */}
+              <Text style={styles.scoringSubtitle}>맞대기 용접 (Butt Weld)</Text>
+              {[
+                ["비드 폭 균일성", "30%", "P75-P25 편차, 0.5mm당 -5점"],
+                ["직진도",        "30%", "최대 이탈, 0.5mm당 -5점"],
+                ["비드 높이",     "20%", "측면 사진 있을 때 (편차 기준)"],
+                ["기본 형상",     "20%", "결함 감점으로 차감됨"],
+              ].map(([item, weight, desc]) => (
+                <View key={item} style={styles.scoringRow}>
+                  <Text style={styles.scoringItem}>{item}</Text>
+                  <Text style={styles.scoringWeight}>{weight}</Text>
+                  <Text style={styles.scoringDesc}>{desc}</Text>
+                </View>
+              ))}
+
+              {/* 필릿 채점 */}
+              <Text style={[styles.scoringSubtitle, { marginTop: 14 }]}>필릿 용접 (Fillet Weld)</Text>
+              {[
+                ["각장 균일성 (Z1-Z2)",   "35%", "차이 0.5mm당 -5점"],
+                ["목두께 달성률",           "25%", "85~110% 범위 = 100점"],
+                ["부등각장",                "20%", "차이 0.5mm당 -10점"],
+                ["볼록도",                  "20%", "0.5mm당 -5점"],
+              ].map(([item, weight, desc]) => (
+                <View key={item} style={styles.scoringRow}>
+                  <Text style={styles.scoringItem}>{item}</Text>
+                  <Text style={styles.scoringWeight}>{weight}</Text>
+                  <Text style={styles.scoringDesc}>{desc}</Text>
+                </View>
+              ))}
+
+              {/* 결함 감점표 */}
+              <Text style={[styles.scoringSubtitle, { marginTop: 14 }]}>결함 감점 기준</Text>
+              {[
+                ["균열 (Crack)",       "-100점", "즉시 불합격"],
+                ["용입/용착 불량",     "-20점",  "개당"],
+                ["기공 (Porosity)",    "-10점",  "2mm 초과 시 -15점"],
+                ["언더컷 / 오버랩",   "-10점",  "개당"],
+                ["아크 스트라이크",   "-10점",  "개당"],
+                ["여고 과다",          "-10점",  "개당"],
+                ["스패터",             "-5점",   "3개 초과 시 -10점/개"],
+              ].map(([defect, pts, note]) => (
+                <View key={defect} style={styles.scoringRow}>
+                  <Text style={[styles.scoringItem, { color: Colors.text }]}>{defect}</Text>
+                  <Text style={[styles.scoringWeight, { color: Colors.danger }]}>{pts}</Text>
+                  <Text style={styles.scoringDesc}>{note}</Text>
+                </View>
+              ))}
+
+              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, marginTop: 14, lineHeight: 17 }}>
+                ※ 탐지 신뢰도 20% 이상의 결함을 모두 포함합니다. 최종 점수는 0점 미만으로 내려가지 않습니다.
+              </Text>
+            </ScrollView>
+            <Pressable
+              style={[styles.fbSubmitBtn, { marginTop: 14 }]}
+              onPress={() => setShowScoringInfo(false)}
+            >
+              <Text style={styles.fbSubmitBtnText}>확인</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2068,6 +2189,71 @@ const styles = StyleSheet.create({
   historyScore: { alignItems: "flex-end" },
   historyScoreNum: { fontFamily: "Inter_700Bold", fontSize: 20 },
   historyGrade: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11 },
+  infoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: Colors.primary + "18",
+    borderWidth: 1,
+    borderColor: Colors.primary + "44",
+  },
+  infoBtnText: {
+    color: Colors.primary,
+    fontFamily: "Inter_500Medium",
+    fontSize: 11,
+  },
+  scoringFormula: {
+    color: Colors.text,
+    fontFamily: "Inter_700Bold",
+    fontSize: 14,
+    textAlign: "center",
+    backgroundColor: Colors.primary + "18",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: Colors.primary + "44",
+  },
+  scoringSubtitle: {
+    color: Colors.primary,
+    fontFamily: "Inter_700Bold",
+    fontSize: 13,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    paddingBottom: 4,
+  },
+  scoringRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border + "60",
+    gap: 6,
+  },
+  scoringItem: {
+    color: Colors.textSecondary,
+    fontFamily: "Inter_500Medium",
+    fontSize: 12,
+    flex: 1.5,
+  },
+  scoringWeight: {
+    color: Colors.primary,
+    fontFamily: "Inter_700Bold",
+    fontSize: 12,
+    width: 40,
+    textAlign: "right",
+  },
+  scoringDesc: {
+    color: Colors.textMuted,
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    flex: 2,
+  },
   filletRow: {
     flexDirection: "row",
     justifyContent: "space-between",

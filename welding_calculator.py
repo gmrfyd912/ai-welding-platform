@@ -74,31 +74,65 @@ def _calculate_fillet_score(fillet_result: dict) -> dict:
 
 
 def _defect_penalty(combined_defects):
-    """결함 감점 계산. (penalty, defect_list_ko, is_critical_fail) 반환."""
+    """
+    결함 감점 계산 (Roboflow confidence 20% 기준, 개수별 누적 감점).
+
+    감점 기준표 (AWS D1.1 / NCS 용접 평가 기준 참고):
+    ┌─────────────────────────────┬──────────────────────────────────┐
+    │ 결함 종류                   │ 감점 (개당)                      │
+    ├─────────────────────────────┼──────────────────────────────────┤
+    │ 균열 (Crack)                │ -100점, 즉시 불합격              │
+    │ 용입/용착 불량              │ -20점                            │
+    │ 기공 (Porosity)             │ -10점 (크기 2mm 초과 시 -15점)  │
+    │ 언더컷 (Undercut)           │ -10점                            │
+    │ 오버랩 (Overlap)            │ -10점                            │
+    │ 아크 스트라이크             │ -10점                            │
+    │ 여고 과다 (Excessive Reinf.)│ -10점                            │
+    │ 스패터 (Spatter)            │ -5점 (3개 초과 시 누적 -5점 추가)│
+    └─────────────────────────────┴──────────────────────────────────┘
+    """
     penalty = 0
     defect_list_ko = []
     is_critical_fail = False
+    spatter_count = 0
+
     for d in combined_defects:
         d_type   = d.get('class', '')
         d_size   = d.get('size_mm', 0)
         src      = d.get('source', 'front')
         face_tag = "[이면] " if src == 'back' else ""
+
         if d_type == 'Crack':
-            penalty += 100; defect_list_ko.append(f"{face_tag}균열({d_size}mm, 즉시 불합격)"); is_critical_fail = True
+            penalty += 100
+            defect_list_ko.append(f"{face_tag}균열({d_size}mm, 즉시 불합격)")
+            is_critical_fail = True
         elif d_type in ['Lack of Fusion', 'Incomplete Penetration']:
-            penalty += 20; defect_list_ko.append(f"{face_tag}용입/용착 불량({d_size}mm, -20점)")
+            penalty += 20
+            defect_list_ko.append(f"{face_tag}용입/용착 불량({d_size}mm, -20점)")
         elif d_type == 'Porosity':
-            penalty += 10; defect_list_ko.append(f"{face_tag}기공({d_size}mm, -10점)")
+            pts = 15 if d_size > 2.0 else 10
+            penalty += pts
+            defect_list_ko.append(f"{face_tag}기공({d_size}mm, -{pts}점)")
         elif d_type == 'Undercut':
-            penalty += 10; defect_list_ko.append(f"{face_tag}언더컷({d_size}mm, -10점)")
+            penalty += 10
+            defect_list_ko.append(f"{face_tag}언더컷({d_size}mm, -10점)")
         elif d_type == 'Overlap':
-            penalty += 10; defect_list_ko.append(f"{face_tag}오버랩({d_size}mm, -10점)")
+            penalty += 10
+            defect_list_ko.append(f"{face_tag}오버랩({d_size}mm, -10점)")
         elif d_type == 'Arc Strike':
-            penalty += 10; defect_list_ko.append(f"{face_tag}아크 스트라이크(-10점)")
+            penalty += 10
+            defect_list_ko.append(f"{face_tag}아크 스트라이크(-10점)")
         elif d_type == 'Spatter':
-            penalty += 5; defect_list_ko.append(f"{face_tag}스패터(-5점)")
+            spatter_count += 1
+            base_pts = 5
+            if spatter_count > 3:
+                base_pts += 5  # 3개 초과분은 누적 강화
+            penalty += base_pts
+            defect_list_ko.append(f"{face_tag}스패터(-{base_pts}점, 누적 {spatter_count}개)")
         elif d_type == 'Excessive Reinforcement':
-            penalty += 10; defect_list_ko.append(f"{face_tag}여고 과다({d_size}mm, -10점)")
+            penalty += 10
+            defect_list_ko.append(f"{face_tag}여고 과다({d_size}mm, -10점)")
+
     return penalty, defect_list_ko, is_critical_fail
 
 
