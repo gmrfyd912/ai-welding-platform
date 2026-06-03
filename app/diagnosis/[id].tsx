@@ -851,14 +851,24 @@ export default function DiagnosisScreen() {
         body: JSON.stringify({
           resultId:      result.id,
           aiModel:       reanalyzeModel,
-          // DB에 없는 측정값을 백엔드 LLM 컨텍스트용으로 전달
+          // DB에 없는 측정값을 백엔드 LLM Ground-Truth 컨텍스트용으로 전달
           laserAnalysis:  result.laserAnalysis ?? null,
           filletAnalysis: result.filletAnalysis ?? null,
           visionData: {
-            aiScore:      result.aiScore,
-            beadAnalysis: result.beadAnalysis,
-            defects:      result.defects,
-            top3Defects:  result.top3Defects,
+            aiScore:         result.aiScore,
+            overallVerdict:  result.overallVerdict,
+            beadAnalysis:    result.beadAnalysis,
+            defects:         result.defects,
+            top3Defects:     result.top3Defects,
+            trendScores:     result.trendScores,
+            selfScore:       result.selfScore,
+            process:         result.process,
+            posture:         result.posture,
+            material:        result.material,
+            beadType:        result.beadType ?? null,
+            passType:        (result as any).passType ?? null,
+            improvements:    result.improvements,
+            defectLocations: result.defectLocations ?? [],
           },
         }),
       });

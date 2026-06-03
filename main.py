@@ -610,7 +610,8 @@ async def analyze_welding_full(
     pass_type:      str = Form(""),
     ai_model:       str = Form("gpt"),
     admin_feedback: str = Form(""),
-    user_history:   str = Form(""),
+    user_history:       str = Form(""),
+    measurement_context: str = Form(""),  # 재분석 시 LLM system 프롬프트 주입용 Ground-Truth
     plate_thickness: str = Form(""),
     pipe_outer_diameter_mm: str = Form(""),
     language: str = Form("ko"),
@@ -758,6 +759,7 @@ async def analyze_welding_full(
                 has_side_photo=has_side_measurement,
                 per_photo_bead=weld_data.get("per_photo_bead"),
                 fillet_data=fillet_result,
+                measurement_ground_truth=measurement_context,
             )
             rep_len = len(str(expert_advice.get("comprehensiveReport", "")))
             n_imp   = len(expert_advice.get("improvements", []) or [])

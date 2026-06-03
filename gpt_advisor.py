@@ -170,6 +170,7 @@ async def get_expert_advice(
     has_side_photo: bool = False,
     per_photo_bead: dict | None = None,
     fillet_data=None,
+    measurement_ground_truth: str = "",  # 재분석 시 system 프롬프트에 주입되는 확정 실측 데이터
 ):
     """
     GPT-4o 비전 종합 리포트 생성. images 리스트로 모든 사진(정면/측면/이면)을 함께 전달해
@@ -181,6 +182,23 @@ async def get_expert_advice(
 
     n_photos = len(images)
     system_prompt = _build_system_prompt(language_name, has_side_photo=has_side_photo, n_photos=n_photos)
+
+    # ── Ground-Truth 주입: 재분석 시 확정 실측 데이터를 system 영역에 강제 삽입 ──
+    if measurement_ground_truth and measurement_ground_truth.strip():
+        system_prompt += (
+            "\n\n"
+            + "=" * 60 + "\n"
+            + "CRITICAL ANTI-HALLUCINATION CONSTRAINT\n"
+            + "=" * 60 + "\n"
+            + "경고: 너는 용접 전문가 AI다.\n"
+            + "반드시 아래 [1차 측정 데이터]의 수치(aiScore, 각장, 각목, 비드폭, 결함명 등)와\n"
+            + "결함 내용만을 100% 동일하게 인용하여 리포트를 작성해야 한다.\n"
+            + "제공되지 않은 수치나 사실을 절대 지어내거나(Hallucination) 추측하지 마라.\n"
+            + "측정되지 않은 항목은 '미측정'으로 명시하고, 절대 임의 값을 사용하지 마라.\n\n"
+            + measurement_ground_truth + "\n"
+            + "=" * 60 + "\n"
+            + "위 수치에 반하는 내용을 작성하면 오답이다. 반드시 위 Ground-Truth를 그대로 인용하라.\n"
+        )
 
     user_text = (
         _summarize_current(weld_data, context_meta, fillet_data=fillet_data)

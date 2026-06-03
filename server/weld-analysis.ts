@@ -111,6 +111,7 @@ async function callFastApiAnalyze(params: {
   pipeOuterDiameterMm: string;
   language:       string;
   analysisMode:   string;
+  measurementContext?: string;  // 재분석 시 LLM system 프롬프트에 주입할 Ground-Truth
   // 추가 파라미터 (FastAPI Form 기본값 있음)
   isFillet?:      boolean;
   hasLaser?:      boolean;
@@ -142,6 +143,10 @@ async function callFastApiAnalyze(params: {
   formData.append("pipe_outer_diameter_mm", params.pipeOuterDiameterMm);
   formData.append("language",       params.language);
   formData.append("analysis_mode",  params.analysisMode || "quick");
+  // 재분석용 Ground-Truth: system 프롬프트에 주입되어 환각 방지
+  if (params.measurementContext) {
+    formData.append("measurement_context", params.measurementContext);
+  }
   // 필릿·레이저 파라미터 — FastAPI Form 기본값(false/45)이 있으나 명시 전달
   formData.append("is_fillet",      params.isFillet  ? "true" : "false");
   formData.append("has_laser",      params.hasLaser  ? "true" : "false");
@@ -354,58 +359,82 @@ export function registerWeldAnalysisRoute(app: Express): void {
       const dbDefects = (safeJson(row.defects) ?? []) as any[];
       const dbTop3    = (safeJson(row.top3_defects) ?? []) as string[];
 
+      // ── Ground-Truth 블록 빌드 (Key-Value 형식, 환각 방지용) ──────
+      // DB 값을 기준으로 프론트 전달값(레이저/필릿/visionData)으로 보완
+      const fv = visionData ?? {};  // front-end 전달 visionData
+      const beadSrc  = fv.beadAnalysis ?? dbBead;
+      const defectSrc = (fv.defects ?? dbDefects) as any[];
+      const top3Src   = (fv.top3Defects ?? dbTop3) as string[];
+
+      const kv = (label: string, val: any) =>
+        val != null && val !== "" ? `  ${label}: ${val}` : null;
+
       const ctxLines: string[] = [
-        "[비전 측정 결과 — AI가 이 수치를 반드시 종합 리포트에 반영할 것]",
-        `AI 점수: ${row.ai_score ?? "N/A"}점 (${row.overall_verdict ?? "N/A"})`,
-        `공정: ${row.process || "N/A"} / 자세: ${row.posture || "N/A"} / 재료: ${row.material || "N/A"}`,
-      ];
+        "=== 1차 비전 측정 Ground-Truth ===",
+        "경고: 아래 수치는 비전 AI가 확정한 실측값이다.",
+        "반드시 이 값들만 100% 동일하게 인용하라. 없는 수치를 지어내거나 추측하는 것은 금지다.",
+        "",
+        "[기본 정보]",
+        kv("AI점수",     fv.aiScore    ?? row.ai_score),
+        kv("판정",       fv.overallVerdict ?? row.overall_verdict),
+        kv("자체점수",   fv.selfScore),
+        kv("공정",       fv.process    ?? row.process),
+        kv("자세",       fv.posture    ?? row.posture),
+        kv("재료",       fv.material   ?? row.material),
+        kv("비드유형",   fv.beadType   ?? row.bead_type),
+        kv("패스유형",   fv.passType),
+      ].filter(Boolean) as string[];
 
-      if (dbBead) {
-        ctxLines.push(`비드 총점: ${dbBead.totalScore ?? "N/A"}점`);
-        if (dbBead.width?.value)       ctxLines.push(`비드 폭 측정값: ${dbBead.width.value} (점수 ${dbBead.width.score}점)`);
-        if (dbBead.straightness?.value) ctxLines.push(`직진도 측정값: ${dbBead.straightness.value} (점수 ${dbBead.straightness.score}점)`);
-        if (dbBead.height?.value)      ctxLines.push(`높이 측정값: ${dbBead.height.value} (점수 ${dbBead.height.score}점)`);
+      if (beadSrc) {
+        ctxLines.push("", "[비드 분석]");
+        if (kv("비드총점",   beadSrc.totalScore))      ctxLines.push(kv("비드총점", beadSrc.totalScore)!);
+        if (beadSrc.width)       ctxLines.push(`  비드폭: ${beadSrc.width.value} (${beadSrc.width.score}점)`);
+        if (beadSrc.straightness) ctxLines.push(`  직진도: ${beadSrc.straightness.value} (${beadSrc.straightness.score}점)`);
+        if (beadSrc.height)      ctxLines.push(`  비드높이: ${beadSrc.height.value} (${beadSrc.height.score}점)`);
       }
 
-      if (dbTop3.length > 0) ctxLines.push(`주요 결함 Top3: ${dbTop3.join(", ")}`);
+      if (top3Src.length > 0) {
+        ctxLines.push("", "[주요 결함 Top3]");
+        top3Src.forEach((d, i) => ctxLines.push(`  ${i + 1}위: ${d}`));
+      }
 
-      const detectedDefects = dbDefects.filter((d: any) => d.detected);
+      const detectedDefects = defectSrc.filter((d: any) => d.detected);
       if (detectedDefects.length > 0) {
-        ctxLines.push(
-          `검출 결함 상세: ${detectedDefects
-            .map((d: any) => `${d.name}(심각도:${d.severity}, 측정:${d.measured}, 기준:${d.limit}, 결과:${d.result})`)
-            .join(" / ")}`
+        ctxLines.push("", "[결함 상세]");
+        detectedDefects.forEach((d: any) =>
+          ctxLines.push(`  - ${d.name}: 심각도=${d.severity}, 측정=${d.measured}, 기준=${d.limit}, 결과=${d.result}`)
         );
       }
 
-      // visionData: 프론트에서 추가 전달한 보조 데이터 (있을 경우)
-      if (visionData?.aiScore != null) ctxLines.push(`빠른 분석 aiScore: ${visionData.aiScore}`);
-
-      // laserAnalysis: DB에 없으므로 프론트에서 전달
+      // 레이저 3D (DB 없음 → 프론트 전달)
       if (laserAnalysis?.status === "success") {
-        ctxLines.push(
-          `레이저 3D 측정: 최대높이=${laserAnalysis.beadHeightMax}mm / 최소높이=${laserAnalysis.beadHeightMin}mm` +
-          ` / 평균높이=${laserAnalysis.beadHeightAvg}mm / 볼록성=${laserAnalysis.convexity}(${laserAnalysis.convexityMm}mm)`
-        );
+        ctxLines.push("", "[레이저 3D 측정]");
+        ctxLines.push(`  최대높이: ${laserAnalysis.beadHeightMax}mm`);
+        ctxLines.push(`  최소높이: ${laserAnalysis.beadHeightMin}mm`);
+        ctxLines.push(`  평균높이: ${laserAnalysis.beadHeightAvg}mm`);
+        ctxLines.push(`  볼록성: ${laserAnalysis.convexity} (${laserAnalysis.convexityMm}mm)`);
         if (laserAnalysis.is_cross_validated) {
-          ctxLines.push(`교차검증 신뢰도: ${laserAnalysis.confidence_score}%`);
+          ctxLines.push(`  교차검증 신뢰도: ${laserAnalysis.confidence_score}%`);
         }
       }
 
-      // filletAnalysis: DB에 없으므로 프론트에서 전달
+      // 필릿 분석 (DB 없음 → 프론트 전달)
       if (filletAnalysis?.beadWidth != null) {
-        ctxLines.push(
-          `필렛 분석: 비드폭=${filletAnalysis.beadWidth}mm / 등각=${filletAnalysis.equalLeg}mm` +
-          ` / 이론 목두께=${filletAnalysis.theoreticalThroat}mm / 실제 목두께=${filletAnalysis.actualThroat}mm` +
-          ` / 볼록성=${filletAnalysis.convexity?.type}(${filletAnalysis.convexity?.value_mm}mm)`
-        );
+        ctxLines.push("", "[필렛 분석]");
+        ctxLines.push(`  비드 표면너비: ${filletAnalysis.beadWidth}mm`);
+        ctxLines.push(`  등각장(Z): ${filletAnalysis.equalLeg}mm`);
+        ctxLines.push(`  이론 목두께: ${filletAnalysis.theoreticalThroat}mm`);
+        ctxLines.push(`  실제 목두께: ${filletAnalysis.actualThroat}mm`);
+        ctxLines.push(`  볼록성: ${filletAnalysis.convexity?.type} (${filletAnalysis.convexity?.value_mm}mm)`);
         if (filletAnalysis.unequalLeg?.isUnequal) {
-          ctxLines.push(`불균등 각장: Z1=${filletAnalysis.unequalLeg.z1}mm / Z2=${filletAnalysis.unequalLeg.z2}mm`);
+          ctxLines.push(`  부등각장: Z1=${filletAnalysis.unequalLeg.z1}mm / Z2=${filletAnalysis.unequalLeg.z2}mm`);
         }
       }
+
+      ctxLines.push("", "=== Ground-Truth 끝 ===");
 
       const measurementContext = ctxLines.join("\n");
-      console.log(`[reanalyze] 측정 컨텍스트 ${ctxLines.length}줄 LLM에 주입`);
+      console.log(`[reanalyze] Ground-Truth ${ctxLines.length}줄 → LLM system 프롬프트 주입`);
 
       let adminFeedback = "";
       try {
@@ -421,14 +450,15 @@ export function registerWeldAnalysisRoute(app: Express): void {
         frontPhoto: frontBase64,
         sidePhoto:  sideBase64,
         backPhoto:  backBase64,
-        process:    row.process  || "FCAW",
-        posture:    row.posture  || "1G",
-        material:   row.material || "탄소강 평판",
-        beadType:   row.bead_type || "위빙 비드",
-        passType:   "",
+        process:    visionData?.process    || row.process  || "FCAW",
+        posture:    visionData?.posture    || row.posture  || "1G",
+        material:   visionData?.material   || row.material || "탄소강 평판",
+        beadType:   visionData?.beadType   || row.bead_type || "위빙 비드",
+        passType:   visionData?.passType   || "",
         aiModel:    aiModel || "gpt",
         adminFeedback,
-        userHistory:        measurementContext,   // 측정값 전체 주입
+        userHistory:        "",             // 이력은 빈값 — ground-truth와 역할 분리
+        measurementContext,                  // system 프롬프트 주입용 Ground-Truth
         plateThickness:     "",
         pipeOuterDiameterMm: "",
         language:    "ko",
