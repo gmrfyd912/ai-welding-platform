@@ -694,6 +694,8 @@ async def analyze_welding_full(
         has_side_photo=has_side_photo,
         side_vision_data=side_vision_data,
         back_vision_data=back_vision_data,
+        is_fillet=is_fillet_bool,
+        fillet_result=fillet_result,
     )
     print(f"[Calculator] 비드총점={weld_data['bead_total_score']} 최종={weld_data['final_score']} "
           f"판정={weld_data['is_pass']}")

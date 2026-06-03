@@ -916,72 +916,145 @@ export default function DiagnosisScreen() {
           <StatCard label={t("diag_bestScore")} value={`${bestScore}${t("points_suffix")}`} color={Colors.gold} />
         </View>
 
-        <SectionCard
-          title={t("diag_beadAnalysis")}
-          icon="ruler-square"
-          badge={currentPhotoAnalysis?.beadAnalysis ? (
-            <Text style={{ color: getGradeColor(currentPhotoAnalysis.beadAnalysis.totalScore), fontFamily: "Inter_700Bold", fontSize: 15 }}>
-              {currentPhotoAnalysis.beadAnalysis.totalScore}{t("points_suffix")}
-            </Text>
-          ) : undefined}
-        >
-          {hasMultiplePhotos && (
-            <>
-              <PhotoTabBar tabs={photoTabs} selected={selectedPhotoView} onSelect={(k) => { setSelectedPhotoView(k); setImgNaturalSize(null); setImgRenderedSize(null); }} />
-              <ExpoImage
-                source={{ uri: selectedPhotoUri }}
-                style={styles.sectionPhotoThumb}
-                contentFit="cover"
-              />
-            </>
-          )}
-          {currentPhotoAnalysis?.beadAnalysis ? (
-            <>
-              {(() => {
+        {/* ── 비드/필릿 분석 (용접 종류에 따라 동적 분기) ── */}
+        {result.filletAnalysis ? (() => {
+          const fa = result.filletAnalysis!;
+          const scoreColor = (s: number) =>
+            s >= 90 ? Colors.primary : s >= 75 ? Colors.success : s >= 60 ? Colors.warning : Colors.danger;
+          const convexColor = fa.convexity.type === "convex" ? Colors.warning
+            : fa.convexity.type === "concave" ? Colors.danger : Colors.success;
+          const convexLabel = fa.convexity.type === "convex" ? "볼록"
+            : fa.convexity.type === "concave" ? "오목" : "평탄";
+          const filletRows: Array<{ label: string; value: string; score?: number }> = [
+            { label: "등각장 (Z)", value: `${fa.equalLeg}mm` },
+            { label: "수직 각장 (Z1)", value: fa.unequalLeg.z1 != null ? `${fa.unequalLeg.z1}mm` : "-" },
+            { label: "수평 각장 (Z2)", value: fa.unequalLeg.z2 != null ? `${fa.unequalLeg.z2}mm` : "-" },
+            { label: "이론 목두께", value: `${fa.theoreticalThroat}mm` },
+            { label: "실제 목두께", value: `${fa.actualThroat}mm` },
+          ];
+          return (
+            <SectionCard title="필릿 비드 분석" icon="set-square">
+              {hasMultiplePhotos && (
+                <>
+                  <PhotoTabBar tabs={photoTabs} selected={selectedPhotoView} onSelect={(k) => { setSelectedPhotoView(k); setImgNaturalSize(null); setImgRenderedSize(null); }} />
+                  <ExpoImage source={{ uri: selectedPhotoUri }} style={styles.sectionPhotoThumb} contentFit="cover" />
+                </>
+              )}
+              {/* 각장 / 목두께 측정값 */}
+              {filletRows.map(({ label, value }) => (
+                <View key={label} style={styles.filletRow}>
+                  <Text style={styles.filletLabel}>{label}</Text>
+                  <Text style={styles.filletValue}>{value}</Text>
+                </View>
+              ))}
+              {/* 부등각장 */}
+              <View style={styles.filletRow}>
+                <Text style={styles.filletLabel}>부등각장</Text>
+                {fa.unequalLeg.isUnequal ? (
+                  <View style={styles.filletWarnBadge}>
+                    <MaterialCommunityIcons name="alert" size={12} color={Colors.warning} />
+                    <Text style={styles.filletWarnText}>차이 {fa.unequalLeg.difference ?? "?"}mm</Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.filletValue, { color: Colors.success }]}>균등</Text>
+                )}
+              </View>
+              {/* 비드 형상 (볼록/오목/평탄) */}
+              <View style={styles.filletRow}>
+                <Text style={styles.filletLabel}>비드 형상</Text>
+                <Text style={[styles.filletValue, { color: convexColor }]}>
+                  {convexLabel} ({fa.convexity.value_mm}mm)
+                </Text>
+              </View>
+              <Text style={styles.filletNote}>※ 부등각장은 참고용 측정값 (비드 폴리곤 기반)</Text>
+              {/* 직진도 보조 정보 */}
+              {currentPhotoAnalysis?.beadAnalysis && (() => {
                 const ba = currentPhotoAnalysis.beadAnalysis!;
-                const beadItems: Array<{ label: string; data: { value: string; score: number } }> = [
-                  { label: t("bead_width"),        data: ba.width },
-                  { label: t("bead_straightness"), data: ba.straightness },
-                ];
-                if (ba.height) {
-                  beadItems.push({ label: t("bead_height"), data: ba.height });
-                }
-                const scoreColor = (s: number) =>
-                  s >= 90 ? Colors.primary
-                  : s >= 80 ? Colors.success
-                  : s >= 65 ? Colors.warning
-                  : Colors.danger;
+                const sc = ba.straightness.score;
+                const c  = scoreColor(sc);
                 return (
-                  <>
-                    {beadItems.map(({ label, data }) => {
-                      const color = scoreColor(data.score);
-                      return (
-                        <View key={label} style={styles.beadRow}>
-                          <View style={styles.beadRowTop}>
-                            <Text style={styles.beadLabel}>{label}</Text>
-                            <Text style={[styles.beadResult, { color }]}>
-                              {data.score}{t("points_suffix")}
-                            </Text>
-                          </View>
-                          <Text style={styles.beadMeasure} numberOfLines={2}>{data.value}</Text>
-                          <View style={styles.beadProgressTrack}>
-                            <View style={[styles.beadProgressFill, { width: `${Math.max(0, Math.min(100, data.score))}%`, backgroundColor: color }]} />
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </>
+                  <View style={[styles.beadRow, { marginTop: 8 }]}>
+                    <View style={styles.beadRowTop}>
+                      <Text style={styles.beadLabel}>{t("bead_straightness")}</Text>
+                      <Text style={[styles.beadResult, { color: c }]}>{sc}{t("points_suffix")}</Text>
+                    </View>
+                    <Text style={styles.beadMeasure} numberOfLines={2}>{ba.straightness.value}</Text>
+                    <View style={styles.beadProgressTrack}>
+                      <View style={[styles.beadProgressFill, { width: `${Math.max(0, Math.min(100, sc))}%`, backgroundColor: c }]} />
+                    </View>
+                  </View>
                 );
               })()}
-            </>
-          ) : (
-            <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 13, textAlign: "center", paddingVertical: 12, paddingHorizontal: 8, lineHeight: 19 }}>
-              {currentPhotoAnalysis?.analysisStatus === "no_bead_detected"
-                ? (selectedPhotoView === "side" ? t("diag_sideNotDetected") : t("diag_backNotDetected"))
-                : (selectedPhotoView === "side" ? t("diag_sideAnalyzing") : t("diag_backAnalyzing"))}
-            </Text>
-          )}
-        </SectionCard>
+            </SectionCard>
+          );
+        })() : (
+          /* ── 맞대기/일반 용접 비드 분석 ── */
+          <SectionCard
+            title={t("diag_beadAnalysis")}
+            icon="ruler-square"
+            badge={currentPhotoAnalysis?.beadAnalysis ? (
+              <Text style={{ color: getGradeColor(currentPhotoAnalysis.beadAnalysis.totalScore), fontFamily: "Inter_700Bold", fontSize: 15 }}>
+                {currentPhotoAnalysis.beadAnalysis.totalScore}{t("points_suffix")}
+              </Text>
+            ) : undefined}
+          >
+            {hasMultiplePhotos && (
+              <>
+                <PhotoTabBar tabs={photoTabs} selected={selectedPhotoView} onSelect={(k) => { setSelectedPhotoView(k); setImgNaturalSize(null); setImgRenderedSize(null); }} />
+                <ExpoImage source={{ uri: selectedPhotoUri }} style={styles.sectionPhotoThumb} contentFit="cover" />
+              </>
+            )}
+            {/* 레이저 높이 최대/최소 (맞대기 전용) */}
+            {result.laserAnalysis?.status === "success" && (
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
+                <StatCard label="높이 최대" value={`${result.laserAnalysis.beadHeightMax.toFixed(2)}mm`} />
+                <StatCard label="높이 최소" value={`${result.laserAnalysis.beadHeightMin.toFixed(2)}mm`} />
+                <StatCard label="높이 균일성" value={`편차 ${result.laserAnalysis.heightVariance.toFixed(2)}mm`} />
+              </View>
+            )}
+            {currentPhotoAnalysis?.beadAnalysis ? (
+              <>
+                {(() => {
+                  const ba = currentPhotoAnalysis.beadAnalysis!;
+                  const beadItems: Array<{ label: string; data: { value: string; score: number } }> = [
+                    { label: t("bead_width"),        data: ba.width },
+                    { label: t("bead_straightness"), data: ba.straightness },
+                  ];
+                  if (ba.height && !result.laserAnalysis) {
+                    beadItems.push({ label: t("bead_height"), data: ba.height });
+                  }
+                  const scoreColor = (s: number) =>
+                    s >= 90 ? Colors.primary : s >= 80 ? Colors.success : s >= 65 ? Colors.warning : Colors.danger;
+                  return (
+                    <>
+                      {beadItems.map(({ label, data }) => {
+                        const color = scoreColor(data.score);
+                        return (
+                          <View key={label} style={styles.beadRow}>
+                            <View style={styles.beadRowTop}>
+                              <Text style={styles.beadLabel}>{label}</Text>
+                              <Text style={[styles.beadResult, { color }]}>{data.score}{t("points_suffix")}</Text>
+                            </View>
+                            <Text style={styles.beadMeasure} numberOfLines={2}>{data.value}</Text>
+                            <View style={styles.beadProgressTrack}>
+                              <View style={[styles.beadProgressFill, { width: `${Math.max(0, Math.min(100, data.score))}%`, backgroundColor: color }]} />
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 13, textAlign: "center", paddingVertical: 12, paddingHorizontal: 8, lineHeight: 19 }}>
+                {currentPhotoAnalysis?.analysisStatus === "no_bead_detected"
+                  ? (selectedPhotoView === "side" ? t("diag_sideNotDetected") : t("diag_backNotDetected"))
+                  : (selectedPhotoView === "side" ? t("diag_sideAnalyzing") : t("diag_backAnalyzing"))}
+              </Text>
+            )}
+          </SectionCard>
+        )}
 
         {result.laserAnalysis?.status === "success" && (() => {
           const la = result.laserAnalysis!;
@@ -1015,6 +1088,41 @@ export default function DiagnosisScreen() {
 
           return (
             <SectionCard title="레이저 비드 형상 분석" icon="pulse-outline">
+              {/* 교차검증 신뢰도 (confidence_score) */}
+              {la.is_cross_validated && la.confidence_score != null && (
+                <View style={{ marginBottom: 12, gap: 6 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={{ color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 12 }}>
+                      AI 레이저 교차검증 신뢰도
+                    </Text>
+                    <Text style={{
+                      color: la.confidence_score >= 80 ? Colors.success : la.confidence_score >= 60 ? Colors.warning : Colors.danger,
+                      fontFamily: "Inter_700Bold",
+                      fontSize: 13,
+                    }}>
+                      {la.confidence_score.toFixed(1)}%
+                    </Text>
+                  </View>
+                  <View style={{ height: 6, backgroundColor: Colors.surface, borderRadius: 3, overflow: "hidden" }}>
+                    <View style={{
+                      height: "100%",
+                      borderRadius: 3,
+                      width: `${Math.min(100, la.confidence_score)}%`,
+                      backgroundColor: la.confidence_score >= 80 ? Colors.success : la.confidence_score >= 60 ? Colors.warning : Colors.danger,
+                    }} />
+                  </View>
+                  {(la.segment_errors?.some((e) => e.is_outlier) ?? false) && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6,
+                      backgroundColor: Colors.warning + "18", borderRadius: 8,
+                      paddingHorizontal: 10, paddingVertical: 5, alignSelf: "flex-start" }}>
+                      <Ionicons name="warning-outline" size={13} color={Colors.warning} />
+                      <Text style={{ color: Colors.warning, fontFamily: "Inter_500Medium", fontSize: 12 }}>
+                        AI 레이저 오차 보정됨 ({la.segment_errors!.filter((e) => e.is_outlier).length}개 구간)
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
               <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
                 <StatCard label="최대 높이" value={`${la.beadHeightMax.toFixed(2)}mm`} />
                 <StatCard label="최소 높이" value={`${la.beadHeightMin.toFixed(2)}mm`} />
@@ -1078,54 +1186,7 @@ export default function DiagnosisScreen() {
           );
         })()}
 
-        {result.filletAnalysis && (() => {
-          const fa = result.filletAnalysis as FilletAnalysis;
-          const convexColor =
-            fa.convexity.type === "convex" ? Colors.warning
-            : fa.convexity.type === "concave" ? Colors.danger
-            : Colors.textSecondary;
-          const convexLabel =
-            fa.convexity.type === "convex" ? "볼록"
-            : fa.convexity.type === "concave" ? "오목"
-            : "평탄";
-          return (
-            <SectionCard title="필렛 용접 분석" icon="triangle-outline">
-              {([
-                ["비드 너비", `${fa.beadWidth}mm`],
-                ["등각장(Z)", `${fa.equalLeg}mm`],
-                ["수직 각장(Z1)", fa.unequalLeg.z1 != null ? `${fa.unequalLeg.z1}mm` : "-"],
-                ["수평 각장(Z2)", fa.unequalLeg.z2 != null ? `${fa.unequalLeg.z2}mm` : "-"],
-                ["이론 목두께", `${fa.theoreticalThroat}mm`],
-                ["실제 목두께", `${fa.actualThroat}mm`],
-              ] as [string, string][]).map(([label, value]) => (
-                <View key={label} style={styles.filletRow}>
-                  <Text style={styles.filletLabel}>{label}</Text>
-                  <Text style={styles.filletValue}>{value}</Text>
-                </View>
-              ))}
-              <View style={styles.filletRow}>
-                <Text style={styles.filletLabel}>부등각장</Text>
-                {fa.unequalLeg.isUnequal ? (
-                  <View style={styles.filletWarnBadge}>
-                    <MaterialCommunityIcons name="alert" size={12} color={Colors.warning} />
-                    <Text style={styles.filletWarnText}>
-                      차이 {fa.unequalLeg.difference ?? "?"}mm
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={[styles.filletValue, { color: Colors.success }]}>균등</Text>
-                )}
-              </View>
-              <View style={styles.filletRow}>
-                <Text style={styles.filletLabel}>비드 형상</Text>
-                <Text style={[styles.filletValue, { color: convexColor }]}>
-                  {convexLabel} ({fa.convexity.value_mm}mm)
-                </Text>
-              </View>
-              <Text style={styles.filletNote}>※ 부등각장은 참고용 측정값 (비드 폴리곤 기반)</Text>
-            </SectionCard>
-          );
-        })()}
+        {/* 필릿 전용 SectionCard는 상단 동적 분기 섹션으로 통합됨 */}
 
         <SectionCard
           title={t("diag_defectEval")}

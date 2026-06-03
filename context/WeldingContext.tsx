@@ -160,6 +160,11 @@ export interface WeldingResult {
     profile: Array<{ x_pct: number; height_mm: number }>;
     worstPoint?: { x_pct: number; y_pct: number; height_mm: number };
     message: string;
+    // 교차 검증 융합 (fuse_and_validate)
+    is_cross_validated?: boolean;
+    confidence_score?: number;
+    corrected_profile?: Array<{ x_pct: number; height_mm: number; source: "laser" | "estimated" }>;
+    segment_errors?: Array<{ x_pct: number; error_pct: number; is_outlier: boolean }>;
   } | null;
 }
 

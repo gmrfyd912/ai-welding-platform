@@ -37,6 +37,8 @@ const PHOTO_H = 180;
 const PROCESSES: WeldProcess[] = ["FCAW", "GTAW", "SAW", "EGW", "오토캐리지용접", "협동로봇 용접", "기타"];
 const POSTURES: WeldPosture[] = ["1G", "2G", "3G", "4G", "5G", "6G", "1F", "2F", "3F", "4F", "5F", "기타"];
 const MATERIALS: WeldMaterial[] = ["탄소강 평판", "탄소강 배관", "스테인리스 평판", "스테인리스강 배관", "기타"];
+const BEAD_TYPES = ["위빙 비드", "스트레이트 비드"] as const;
+const PASS_TYPES = ["싱글 패스", "멀티 패스"] as const;
 
 function ChipSelect<T extends string>({
   options,
@@ -120,6 +122,9 @@ export default function RegisterPhotoScreen() {
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
   const [analysisMode, setAnalysisMode] = useState<"quick" | "ai">("quick");
+  const [beadType, setBeadType] = useState<"위빙 비드" | "스트레이트 비드">("위빙 비드");
+  const [passType, setPassType] = useState<"싱글 패스" | "멀티 패스">("싱글 패스");
+  const [plateThickness, setPlateThickness] = useState("");
 
   const selfScoreNum = parseInt(selfScore) || 0;
 
@@ -251,6 +256,9 @@ export default function RegisterPhotoScreen() {
           isFillet,
           hasLaser,
           analysisMode,
+          beadType,
+          passType,
+          plateThickness: plateThickness.trim() || undefined,
         }),
       });
 
@@ -304,6 +312,8 @@ export default function RegisterPhotoScreen() {
         postureCustom: posture === "기타" ? postureCustom : undefined,
         material,
         materialCustom: material === "기타" ? materialCustom : undefined,
+        beadType,
+        passType,
         selfScore: selfScoreNum,
         timestamp: Date.now(),
         trendScores: [aiData.aiScore],
@@ -535,6 +545,74 @@ export default function RegisterPhotoScreen() {
             </Text>
           </Pressable>
         </View>
+
+        {/* 비드 유형 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>비드 유형</Text>
+          <View style={styles.modeSelector}>
+            {BEAD_TYPES.map((bt) => (
+              <Pressable
+                key={bt}
+                style={[styles.modeOption, beadType === bt && styles.modeOptionActive]}
+                onPress={() => { setBeadType(bt); Haptics.selectionAsync(); }}
+              >
+                <Ionicons
+                  name={bt === "위빙 비드" ? "git-merge-outline" : "remove-outline"}
+                  size={14}
+                  color={beadType === bt ? Colors.primary : Colors.textMuted}
+                />
+                <Text style={[styles.modeOptionText, beadType === bt && styles.modeOptionTextActive]}>
+                  {bt}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        {/* 패스 유형 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>패스 유형</Text>
+          <View style={styles.modeSelector}>
+            {PASS_TYPES.map((pt) => (
+              <Pressable
+                key={pt}
+                style={[styles.modeOption, passType === pt && styles.modeOptionActive]}
+                onPress={() => { setPassType(pt); Haptics.selectionAsync(); }}
+              >
+                <Ionicons
+                  name={pt === "싱글 패스" ? "layers-outline" : "layers"}
+                  size={14}
+                  color={passType === pt ? Colors.primary : Colors.textMuted}
+                />
+                <Text style={[styles.modeOptionText, passType === pt && styles.modeOptionTextActive]}>
+                  {pt}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        {/* 판재 두께 (필릿 용접 시 각장 기준값으로 사용) */}
+        {isFillet && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>판재 두께 <Text style={{ color: Colors.textMuted, fontSize: 12, fontFamily: "Inter_400Regular" }}>(필릿 각장 평가 기준)</Text></Text>
+            <View style={styles.thicknessRow}>
+              <Ionicons name="square-outline" size={15} color={Colors.textMuted} />
+              <Text style={styles.thicknessLabel}>판재 두께</Text>
+              <TextInput
+                style={styles.thicknessInput}
+                placeholder="예: 6"
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="decimal-pad"
+                value={plateThickness}
+                onChangeText={setPlateThickness}
+                maxLength={5}
+                numberOfLines={1}
+              />
+              <Text style={styles.thicknessUnit}>mm</Text>
+            </View>
+          </View>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("photo_weldMaterial")}</Text>

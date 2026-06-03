@@ -24,6 +24,84 @@ def _dedup_defects(defect_list):
     return unique
 
 
+def _calculate_fillet_score(fillet_result: dict) -> dict:
+    """
+    필릿 용접 100점 만점 채점.
+    가중치: 각장 균일성 35% | 목두께 달성률 25% | 부등각장 20% | 볼록도 20%
+    """
+    ul   = fillet_result.get("unequalLeg") or {}
+    z1   = ul.get("z1") or fillet_result.get("equalLeg") or 0
+    z2   = ul.get("z2") or fillet_result.get("equalLeg") or 0
+    diff = ul.get("difference") or 0
+
+    # 각장 균일성: Z1-Z2 차이, 0.5mm 당 -5점
+    leg_diff_mm = abs(float(z1) - float(z2)) if (z1 and z2) else float(diff)
+    leg_score   = max(0, 100 - int(leg_diff_mm / 0.5) * 5)
+
+    # 목두께 달성률: 실제/이론 비율 (85~110% = 100점)
+    theoretical = float(fillet_result.get("theoreticalThroat") or 0)
+    actual      = float(fillet_result.get("actualThroat") or 0)
+    if theoretical > 0 and actual > 0:
+        ratio = actual / theoretical
+        if 0.85 <= ratio <= 1.10:
+            throat_score = 100
+        elif ratio < 0.85:
+            throat_score = max(0, int(100 - (0.85 - ratio) * 300))
+        else:
+            throat_score = max(0, int(100 - (ratio - 1.10) * 200))
+    else:
+        throat_score = 70  # 측정 불가
+
+    # 부등각장: 차이 0.5mm 당 -10점
+    is_unequal   = ul.get("isUnequal", False)
+    unequal_score = max(0, 100 - int(float(diff) / 0.5) * 10) if is_unequal else 100
+
+    # 볼록도: |value_mm| 0.5mm 당 -5점 (0에 가까울수록 우수)
+    convex    = fillet_result.get("convexity") or {}
+    convex_mm = abs(float(convex.get("value_mm") or 0))
+    convex_score = max(0, 100 - int(convex_mm / 0.5) * 5)
+
+    total = int(round(
+        0.35 * leg_score + 0.25 * throat_score + 0.20 * unequal_score + 0.20 * convex_score
+    ))
+    return {
+        "leg_score":      leg_score,
+        "throat_score":   throat_score,
+        "unequal_score":  unequal_score,
+        "convex_score":   convex_score,
+        "fillet_total_score": total,
+    }
+
+
+def _defect_penalty(combined_defects):
+    """결함 감점 계산. (penalty, defect_list_ko, is_critical_fail) 반환."""
+    penalty = 0
+    defect_list_ko = []
+    is_critical_fail = False
+    for d in combined_defects:
+        d_type   = d.get('class', '')
+        d_size   = d.get('size_mm', 0)
+        src      = d.get('source', 'front')
+        face_tag = "[이면] " if src == 'back' else ""
+        if d_type == 'Crack':
+            penalty += 100; defect_list_ko.append(f"{face_tag}균열({d_size}mm, 즉시 불합격)"); is_critical_fail = True
+        elif d_type in ['Lack of Fusion', 'Incomplete Penetration']:
+            penalty += 20; defect_list_ko.append(f"{face_tag}용입/용착 불량({d_size}mm, -20점)")
+        elif d_type == 'Porosity':
+            penalty += 10; defect_list_ko.append(f"{face_tag}기공({d_size}mm, -10점)")
+        elif d_type == 'Undercut':
+            penalty += 10; defect_list_ko.append(f"{face_tag}언더컷({d_size}mm, -10점)")
+        elif d_type == 'Overlap':
+            penalty += 10; defect_list_ko.append(f"{face_tag}오버랩({d_size}mm, -10점)")
+        elif d_type == 'Arc Strike':
+            penalty += 10; defect_list_ko.append(f"{face_tag}아크 스트라이크(-10점)")
+        elif d_type == 'Spatter':
+            penalty += 5; defect_list_ko.append(f"{face_tag}스패터(-5점)")
+        elif d_type == 'Excessive Reinforcement':
+            penalty += 10; defect_list_ko.append(f"{face_tag}여고 과다({d_size}mm, -10점)")
+    return penalty, defect_list_ko, is_critical_fail
+
+
 def calculate_bead_scores_for_photo(vision_data):
     """
     사진 1장에 대한 비드 점수 (폭 + 직진도). 사진별 탭 표시 + 평균 계산용.
@@ -48,7 +126,51 @@ def calculate_bead_scores_for_photo(vision_data):
     }
 
 
-def calculate_weld_score(vision_data, has_side_photo=False, side_vision_data=None, back_vision_data=None):
+def calculate_weld_score(
+    vision_data,
+    has_side_photo=False,
+    side_vision_data=None,
+    back_vision_data=None,
+    is_fillet: bool = False,
+    fillet_result: dict | None = None,
+):
+    # ── 공통: 결함 목록 수집 및 감점 계산 ────────────────────────────
+    front_defects = list(vision_data.get('defects_info', []))
+    back_defects  = list(back_vision_data.get('defects_info', [])) if back_vision_data else []
+    for d in front_defects: d.setdefault('source', 'front')
+    for d in back_defects:  d.setdefault('source', 'back')
+    combined_defects = _dedup_defects(front_defects + back_defects)
+    penalty, defect_list_ko, is_critical_fail = _defect_penalty(combined_defects)
+
+    # ── 필릿 용접 채점 분기 ───────────────────────────────────────────
+    if is_fillet and fillet_result and fillet_result.get("status") == "success":
+        fillet_scores = _calculate_fillet_score(fillet_result)
+        fillet_total  = fillet_scores["fillet_total_score"]
+        final_score   = max(0, min(100, fillet_total - penalty))
+        is_pass       = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
+
+        # 사진별 비드 점수도 계산(탭 표시용)
+        front_bead = calculate_bead_scores_for_photo(vision_data) or {}
+        return {
+            "final_score":   final_score,
+            "is_pass":       is_pass,
+            "bead_total_score":   fillet_total,
+            "width_score":        fillet_scores["leg_score"],
+            "width_variance":     0.0,
+            "straightness_score": fillet_scores["throat_score"],
+            "straightness_variance": 0.0,
+            "height_score":       fillet_scores["unequal_score"],
+            "height_variance":    0.0,
+            "detected_defects":   defect_list_ko,
+            "fillet_scores":      fillet_scores,
+            "per_photo_bead": {
+                "front": front_bead,
+                "side":  None,
+                "back":  None,
+            },
+        }
+
+    # ── 맞대기(일반) 용접 채점 ─────────────────────────────────────────
     # ── 1. 사진별 비드 점수 (정면 / 측면 / 이면 각각 독립 계산) ────────
     front_bead = calculate_bead_scores_for_photo(vision_data) or {
         "width_score": 0,
@@ -78,52 +200,7 @@ def calculate_weld_score(vision_data, has_side_photo=False, side_vision_data=Non
         height_variance = side_bead["width_variance"]
         height_score = side_bead["width_score"]
 
-    # ── 3. 결함 감점 (정면 + 이면 합산 → 중복 제거) ────────────────
-    penalty = 0
-    defect_list_ko = []
-    is_critical_fail = False
-
-    front_defects = list(vision_data.get('defects_info', []))
-    back_defects  = list(back_vision_data.get('defects_info', [])) if back_vision_data else []
-    for d in front_defects:
-        d.setdefault('source', 'front')
-    for d in back_defects:
-        d.setdefault('source', 'back')
-
-    combined_defects = _dedup_defects(front_defects + back_defects)
-
-    for d in combined_defects:
-        d_type   = d.get('class', '')
-        d_size   = d.get('size_mm', 0)
-        src      = d.get('source', 'front')
-        face_tag = "[이면] " if src == 'back' else ""
-
-        if d_type == 'Crack':
-            penalty += 100
-            defect_list_ko.append(f"{face_tag}균열({d_size}mm, 즉시 불합격)")
-            is_critical_fail = True
-        elif d_type in ['Lack of Fusion', 'Incomplete Penetration']:
-            penalty += 20
-            defect_list_ko.append(f"{face_tag}용입/용착 불량({d_size}mm, -20점)")
-        elif d_type == 'Porosity':
-            penalty += 10
-            defect_list_ko.append(f"{face_tag}기공({d_size}mm, -10점)")
-        elif d_type == 'Undercut':
-            penalty += 10
-            defect_list_ko.append(f"{face_tag}언더컷({d_size}mm, -10점)")
-        elif d_type == 'Overlap':
-            penalty += 10
-            defect_list_ko.append(f"{face_tag}오버랩({d_size}mm, -10점)")
-        elif d_type == 'Arc Strike':
-            penalty += 10
-            defect_list_ko.append(f"{face_tag}아크 스트라이크(-10점)")
-        elif d_type == 'Spatter':
-            penalty += 5
-            defect_list_ko.append(f"{face_tag}스패터(-5점)")
-        elif d_type == 'Excessive Reinforcement':
-            penalty += 10
-            defect_list_ko.append(f"{face_tag}여고 과다({d_size}mm, -10점)")
-
+    # ── 3. 결함 감점 (공통 처리에서 이미 계산됨) ─────────────────────
     final_score = max(0, min(100, bead_total_score - penalty))
     is_pass = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
 
