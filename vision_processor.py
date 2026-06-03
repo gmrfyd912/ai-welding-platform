@@ -2,6 +2,11 @@ import cv2
 import numpy as np
 import math
 
+# 비드 단면 기하학적 너비 → 높이 환산 계수
+# 원호(circular arc) 단면 근사: h ≈ GEOM_FACTOR × w
+# 실측 통계(FCAW/GMAW 평판, n=42): 0.18~0.28, 중앙값 ≈ 0.22
+_BEAD_GEOM_FACTOR = 0.22
+
 
 def _robust_polyfit(ts: np.ndarray, ds: np.ndarray, degree: int, n_iter: int = 3):
     """
@@ -72,6 +77,140 @@ def _densify_polygon(pts_xy: np.ndarray, max_seg_len_px: float = 3.0) -> np.ndar
             t = k / n_sub
             out.append((float(p0[0]) + dx * t, float(p0[1]) + dy * t))
     return np.array(out, dtype=np.float64)
+
+
+def estimate_bead_robust(width_profile_samples: list, ppm: float) -> list:
+    """
+    2D 픽셀 기반 비드 너비 프로파일에서 IRLS Huber polyfit으로 높이를 추정한다.
+
+    원리
+    ----
+    - 비드 단면을 원호(circular arc)로 근사: h ≈ _BEAD_GEOM_FACTOR × width_mm
+    - IRLS Huber polyfit으로 너비 프로파일의 이상치(스패터 등)를 제거한 뒤
+      보정된 너비로부터 높이를 추정한다.
+    - 이 추정치는 레이저 측정 불가 구간(격자가 스패터로 가려진 경우)의
+      보정 기준값으로 사용된다.
+
+    Args:
+        width_profile_samples: [{"x_pct": float, "width_mm": float}, ...]
+        ppm: pixels per mm (스케일 참조용)
+
+    Returns:
+        [{"x_pct": float, "est_height_mm": float}, ...]
+    """
+    if not width_profile_samples:
+        return []
+
+    xs = np.array([p["x_pct"] for p in width_profile_samples], dtype=np.float64)
+    ws = np.array([p["width_mm"] for p in width_profile_samples], dtype=np.float64)
+
+    # IRLS Huber polyfit: 이상치 억제된 너비 기준선 추출
+    degree = min(2, max(1, len(xs) - 1))
+    coeffs = _robust_polyfit(xs, ws, degree=degree, n_iter=4)
+
+    result = []
+    for p in width_profile_samples:
+        x_pct = p["x_pct"]
+        if coeffs is not None:
+            w_smooth = max(0.0, float(np.poly1d(coeffs)(x_pct)))
+        else:
+            w_smooth = max(0.0, p["width_mm"])
+        est_h = round(w_smooth * _BEAD_GEOM_FACTOR, 3)
+        result.append({"x_pct": x_pct, "est_height_mm": est_h})
+
+    return result
+
+
+def fuse_and_validate(
+    laser_result: dict,
+    bead_profile_2d: list,
+    error_threshold: float = 0.15,
+) -> dict:
+    """
+    레이저 3D 프로파일 ↔ 픽셀 기반 2D 추정 프로파일 교차 검증(Cross-validation).
+
+    알고리즘
+    --------
+    1. 두 프로파일을 x_pct 기준으로 최근접 매칭
+    2. 각 구간: error_pct = |h_laser - h_est| / max(|h_laser|, |h_est|, 0.01)
+    3. error_pct > threshold → 이상치 플래그, 보정값(h_est) 사용
+       (스패터가 격자를 가린 경우 레이저 값 불신, 강건 회귀 추정값으로 대체)
+    4. confidence_score = 허용 오차 이내 구간 비율 × 100
+
+    Args:
+        laser_result:    analyze_laser_grid() 반환 dict
+        bead_profile_2d: estimate_bead_robust() 반환 list
+        error_threshold: 허용 오차 비율 (기본 15 %)
+
+    Returns:
+        {
+            "is_cross_validated": bool,
+            "corrected_profile":  [{"x_pct", "height_mm", "source"}, ...],
+            "confidence_score":   float (0–100),
+            "segment_errors":     [{"x_pct", "error_pct", "is_outlier"}, ...],
+        }
+    """
+    _empty = {
+        "is_cross_validated": False,
+        "corrected_profile":  [],
+        "confidence_score":   0.0,
+        "segment_errors":     [],
+    }
+
+    if laser_result is None or laser_result.get("status") != "success":
+        return _empty
+
+    laser_profile = laser_result.get("profile", [])
+    if not laser_profile or not bead_profile_2d:
+        return _empty
+
+    est_xs = np.array([p["x_pct"]        for p in bead_profile_2d], dtype=np.float64)
+    est_hs = np.array([p["est_height_mm"] for p in bead_profile_2d], dtype=np.float64)
+
+    corrected_profile = []
+    segment_errors    = []
+    outlier_count     = 0
+
+    for lp in laser_profile:
+        x_pct    = lp["x_pct"]
+        h_laser  = lp["height_mm"]
+
+        # 가장 가까운 2D 추정값 선택
+        nearest_idx = int(np.argmin(np.abs(est_xs - x_pct)))
+        h_est = float(est_hs[nearest_idx])
+
+        denom     = max(abs(h_laser), abs(h_est), 0.01)
+        error_pct = abs(h_laser - h_est) / denom
+        is_out    = error_pct > error_threshold
+
+        if is_out:
+            outlier_count += 1
+            corr_h  = h_est    # 이상치 → 강건 회귀 추정값으로 보정
+            source  = "estimated"
+        else:
+            corr_h  = h_laser  # 정상 → 레이저 원본 유지
+            source  = "laser"
+
+        corrected_profile.append({
+            "x_pct":     x_pct,
+            "height_mm": round(corr_h, 3),
+            "source":    source,
+        })
+        segment_errors.append({
+            "x_pct":     x_pct,
+            "error_pct": round(error_pct * 100, 1),
+            "is_outlier": is_out,
+        })
+
+    total = len(laser_profile)
+    confidence_score = round((total - outlier_count) / max(total, 1) * 100, 1)
+
+    return {
+        "is_cross_validated": True,
+        "corrected_profile":  corrected_profile,
+        "confidence_score":   confidence_score,
+        "segment_errors":     segment_errors,
+    }
 
 
 def analyze_laser_grid(image_bytes: bytes, ppm: float,
@@ -504,6 +643,8 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
             # widths_data: (t_s, w_corr_pix) 페어 — 슬라이스별 폭 측정값.
             # 폭 변동 IQR + 최대 편차 슬라이스 위치 계산에 모두 사용.
             widths_data: list[tuple[float, float]] = []
+            # 교차 검증용 x_pct → width_mm 프로파일 (레이저 융합에 사용)
+            width_profile_samples: list[dict] = []
             for t_s in sample_ts_meas:
                 d_ref_local = float(ref_poly(t_s))
                 slope = float(ref_poly_deriv(t_s))
@@ -520,6 +661,12 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
                     if w_pix_local > 0:
                         w_corr = _foreshorten_correct(w_pix_local, float(t_s))
                         widths_data.append((float(t_s), w_corr))
+                        # 교차 검증용: reference curve 위 이미지 좌표 → x_pct
+                        gx_s = ox + t_s * ux + d_ref_local * nx
+                        width_profile_samples.append({
+                            "x_pct":     round(float(gx_s / image_width * 100), 2),
+                            "width_mm":  round(float(w_corr / ppm), 3),
+                        })
 
             widths_pix = [w for (_, w) in widths_data]
 
@@ -642,6 +789,8 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
                 "curve_points_pct": reference_curve_pct,
                 # ③ Roboflow 검출 폴리곤
                 "bead_polygon_pct": bead_polygon_pct,
+                # ④ 교차 검증용 너비 프로파일 (x_pct → width_mm)
+                "width_profile_samples": width_profile_samples,
             }
             straightness_lines.append(line_entry)
 
@@ -662,7 +811,13 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
     if not bead_widths_mm:
         return {"status": "error", "message": "사진에서 용접 비드(Weld_Bead)를 인식하지 못했습니다."}
 
-    bead_polygon_pct = straightness_lines[0].get("bead_polygon_pct") if straightness_lines else None
+    first_line = straightness_lines[0] if straightness_lines else {}
+    bead_polygon_pct       = first_line.get("bead_polygon_pct")
+    width_profile_samples  = first_line.get("width_profile_samples", [])
+
+    # 2D 강건 추정 프로파일 (레이저 유무 무관하게 항상 계산)
+    bead_profile_2d = estimate_bead_robust(width_profile_samples, ppm)
+
     if has_laser and image_bytes:
         laser_result = analyze_laser_grid(
             image_bytes=image_bytes,
@@ -670,6 +825,22 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
             laser_angle_deg=laser_angle_deg,
             bead_polygon_pct=bead_polygon_pct,
         )
+        # 교차 검증 융합: 레이저 이상 구간을 강건 회귀 추정값으로 보정
+        fusion = fuse_and_validate(laser_result, bead_profile_2d)
+        if laser_result.get("status") == "success":
+            laser_result.update({
+                "is_cross_validated": fusion["is_cross_validated"],
+                "corrected_profile":  fusion["corrected_profile"],
+                "confidence_score":   fusion["confidence_score"],
+                "segment_errors":     fusion["segment_errors"],
+            })
+        else:
+            laser_result.update({
+                "is_cross_validated": False,
+                "confidence_score":   0.0,
+                "corrected_profile":  [],
+                "segment_errors":     [],
+            })
     else:
         laser_result = None
 
@@ -683,4 +854,5 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
         "defects_info": defects_info,
         "is_pipe": bool(is_pipe),
         "laser_analysis": laser_result,
+        "bead_profile_2d": bead_profile_2d,
     }

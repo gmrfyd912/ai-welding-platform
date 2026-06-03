@@ -970,6 +970,7 @@ async def analyze_welding_full(
             "straightness_variance": vision_data["straightness_variance"],
             "side_status":           "ok" if side_vision_data else ("none" if not has_side_photo else "miss"),
             "laser_analysis":        vision_data.get("laser_analysis"),
+            "bead_profile_2d":       vision_data.get("bead_profile_2d"),
         },
         # welding_calculator 원시 출력
         "weldScore": weld_data,
