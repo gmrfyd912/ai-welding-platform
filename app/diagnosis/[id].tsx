@@ -872,8 +872,9 @@ export default function DiagnosisScreen() {
           overallVerdict:      data.overallVerdict ?? result.overallVerdict,
           aiScore:             data.aiScore ?? result.aiScore,
         });
-        // DB 캐시 갱신은 백그라운드로 (화면 전환 후 반영)
-        refreshResults().catch(() => {});
+        // refreshResults() 를 호출하지 않음:
+        // DB에 laserAnalysis/filletAnalysis 컬럼이 없으므로 재조회 시
+        // 해당 필드가 undefined 로 소실됨 → 화면 재진입 시 자연스럽게 갱신됨
       } else {
         const errBody = await resp.json().catch(() => ({}));
         Alert.alert("재분석 오류", errBody?.message ?? "재분석에 실패했습니다. 잠시 후 다시 시도해주세요.");
@@ -1431,7 +1432,7 @@ export default function DiagnosisScreen() {
                   <Text style={styles.noDefect}>{t("diag_noDefect")}</Text>
                 ) : (
                   displayReport.top3Defects.map((d, i) => (
-                    <View key={d} style={styles.top3Row}>
+                    <View key={`${d}-${i}`} style={styles.top3Row}>
                       <Text style={[styles.top3Rank, { color: [Colors.danger, Colors.warning, Colors.warning][i] }]}>
                         {i + 1}
                       </Text>

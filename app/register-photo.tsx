@@ -646,28 +646,41 @@ export default function RegisterPhotoScreen() {
             />
           )}
           {material.includes("배관") && (
-            <View style={[styles.thicknessRow, { marginTop: 10 }]}>
-              <Ionicons name="ellipse-outline" size={15} color={Colors.textMuted} />
-              <Text style={styles.thicknessLabel}>{t("reg_pipeOuterDiameter")}</Text>
+            <View style={{ gap: 6, marginTop: 10 }}>
+              {/* 규격표 버튼 — TextInput 과 분리하여 독립 행에 배치 (터치 확보) */}
               <Pressable
                 onPress={() => setShowPipeGuide(true)}
-                style={({ pressed }) => [styles.pipeGuideBtn, pressed && { opacity: 0.7 }]}
-                hitSlop={6}
+                style={{ flexDirection: "row", alignItems: "center", gap: 5,
+                  alignSelf: "flex-start",
+                  paddingHorizontal: 12, paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: Colors.primary + "18",
+                  borderWidth: 1, borderColor: Colors.primary + "55",
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Ionicons name="information-circle-outline" size={14} color={Colors.primary} />
-                <Text style={styles.pipeGuideBtnText}>{t("reg_pipeSpec")}</Text>
+                <Ionicons name="list-outline" size={15} color={Colors.primary} />
+                <Text style={{ color: Colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>
+                  {t("reg_pipeSpec")} (외경 자동입력)
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
               </Pressable>
-              <TextInput
-                style={styles.thicknessInput}
-                placeholder="예: 100"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="decimal-pad"
-                value={pipeOuterDiameter}
-                onChangeText={setPipeOuterDiameter}
-                maxLength={6}
-                numberOfLines={1}
-              />
-              <Text style={styles.thicknessUnit}>mm</Text>
+              {/* 외경 직접 입력 행 */}
+              <View style={styles.thicknessRow}>
+                <Ionicons name="ellipse-outline" size={15} color={Colors.textMuted} />
+                <Text style={styles.thicknessLabel}>{t("reg_pipeOuterDiameter")}</Text>
+                <TextInput
+                  style={styles.thicknessInput}
+                  placeholder="예: 100"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="decimal-pad"
+                  value={pipeOuterDiameter}
+                  onChangeText={setPipeOuterDiameter}
+                  maxLength={6}
+                  numberOfLines={1}
+                />
+                <Text style={styles.thicknessUnit}>mm</Text>
+              </View>
             </View>
           )}
         </View>
