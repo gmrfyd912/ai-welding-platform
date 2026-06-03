@@ -7,7 +7,7 @@
  *
  * 환경 변수:
  *   FASTAPI_PORT  — FastAPI 포트 (기본 8080)
- *   PORT          — Node.js 포트 (기본 5000)
+ *   PORT          — Node.js 포트 (기본 5001)
  *
  * Python uvicorn이 PATH에 있어야 합니다.
  *   pip install uvicorn fastapi openai anthropic httpx numpy opencv-python-headless python-multipart
@@ -20,7 +20,7 @@ const fs        = require("fs");
 const os   = require("os");
 const ROOT = path.resolve(__dirname, "..");
 const FASTAPI_PORT = process.env.FASTAPI_PORT ?? "8080";
-const NODE_PORT    = process.env.PORT          ?? "5000";
+const NODE_PORT    = process.env.PORT          ?? "5001";
 
 // 로컬 Wi-Fi IP 자동 감지 (모바일 기기가 접속해야 할 주소)
 function getLocalIP() {

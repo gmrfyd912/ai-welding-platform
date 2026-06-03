@@ -8,7 +8,7 @@ const PRODUCTION_URL = "https://ai-welding-platform.onrender.com";
  *
  * 우선순위:
  * 1. EXPO_PUBLIC_DOMAIN 환경 변수 (명시적 설정)
- * 2. 개발(DEV) 모드 + Expo 호스트 → PC 로컬 IP:5000 자동 감지
+ * 2. 개발(DEV) 모드 + Expo 호스트 → PC 로컬 IP:5001 자동 감지
  *    (같은 Wi-Fi의 모바일 기기가 PC 서버에 자동 연결)
  * 3. 기본값: Render 프로덕션 서버
  */
@@ -29,10 +29,10 @@ export function getApiUrl(): string {
       const hostUri: string | undefined = Constants?.expoConfig?.hostUri;
       if (hostUri) {
         // hostUri 예: "192.168.0.11:8081" (Expo Metro 포트)
-        // Express 서버는 5000번 포트에서 실행
+        // Express 서버는 5001번 포트에서 실행
         const ip = hostUri.split(":")[0];
         if (ip && ip !== "localhost" && ip !== "127.0.0.1") {
-          const devUrl = `http://${ip}:5000/`;
+          const devUrl = `http://${ip}:5001/`;
           console.log(`[API] DEV 모드 — 로컬 서버 자동 감지: ${devUrl}`);
           return devUrl;
         }
