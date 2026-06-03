@@ -5,22 +5,42 @@ from openai import AsyncOpenAI
 client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
 
 
-def _build_system_prompt(language_name: str = "Korean", has_side_photo: bool = False, n_photos: int = 1) -> str:
-    height_clause = (
-        "bead width/straightness/height numerical interpretation"
-        if has_side_photo
-        else "bead width/straightness numerical interpretation (DO NOT mention or analyze "
-             "bead height — the side photo was not uploaded so height cannot be measured)"
-    )
-    height_rule = (
-        ""
-        if has_side_photo
-        else f"\n- CRITICAL: The trainee did NOT upload a side photo, so bead height is "
-             f"UNKNOWN and unmeasurable. NEVER mention bead height, height deviation, "
-             f"reinforcement height, or any height-related score in any section. Do NOT "
-             f"speculate. If you would normally discuss height, instead recommend uploading "
-             f"a side photo next time for height analysis.\n"
-    )
+def _build_system_prompt(
+    language_name: str = "Korean",
+    has_side_photo: bool = False,
+    n_photos: int = 1,
+    is_fillet: bool = False,
+) -> str:
+    # ── 조인트 유형별 Section 1 분석 기준 ──────────────────────────
+    if is_fillet:
+        height_clause = (
+            "fillet weld quality: leg length uniformity (Z, Z1, Z2), effective throat "
+            "achievement, unequal-leg deviation, and bead convexity/concavity. "
+            "DO NOT discuss bead width deviation or straightness — those are butt-weld metrics "
+            "and are irrelevant for fillet welds."
+        )
+        height_rule = (
+            "\n- CRITICAL FILLET RULE: This is a FILLET weld. NEVER use butt-weld terminology "
+            "(bead width deviation, straightness error, reinforcement height) anywhere in your "
+            "report. Fillet quality is judged ONLY by: leg length (각장 Z), throat (각목 a), "
+            "unequal-leg difference, and convexity. Use these terms exclusively.\n"
+        )
+    else:
+        height_clause = (
+            "bead width/straightness/height numerical interpretation"
+            if has_side_photo
+            else "bead width/straightness numerical interpretation (DO NOT mention or analyze "
+                 "bead height — the side photo was not uploaded so height cannot be measured)"
+        )
+        height_rule = (
+            ""
+            if has_side_photo
+            else f"\n- CRITICAL: The trainee did NOT upload a side photo, so bead height is "
+                 f"UNKNOWN and unmeasurable. NEVER mention bead height, height deviation, "
+                 f"reinforcement height, or any height-related score in any section. Do NOT "
+                 f"speculate. If you would normally discuss height, instead recommend uploading "
+                 f"a side photo next time for height analysis.\n"
+        )
     multi_view_clause = (
         f"\n- The trainee uploaded {n_photos} photos (front + additional views). "
         f"Examine ALL attached photos together and synthesize one comprehensive diagnosis "
@@ -87,53 +107,71 @@ def _build_system_prompt(language_name: str = "Korean", has_side_photo: bool = F
 
 
 def _summarize_current(weld_data: dict, context_meta: dict, fillet_data=None) -> str:
+    is_fillet = context_meta.get("is_fillet", False)
     defects = weld_data.get("detected_defects", []) or []
     defect_str = ", ".join(defects) if defects else "검출된 결함 없음"
-    width_var = weld_data.get("width_variance", 0)
-    straight_var = weld_data.get("straightness_variance", 0)
-    height_var = weld_data.get("height_variance")
-    if height_var is not None:
-        height_line = f"\n- 높이 편차: {height_var}mm (측면 사진)"
-    else:
-        height_line = (
-            "\n- 비드 높이: 측면 사진 미업로드로 측정 불가 — "
-            "이번 진단에서는 높이 관련 언급을 일절 하지 마세요."
-        )
 
-    return (
+    header = (
         f"[이번 용접 측정값 — 모든 사진 종합]\n"
         f"- 공정: {context_meta.get('process','?')} / 자세: {context_meta.get('posture','?')} / "
         f"모재: {context_meta.get('material','?')} / 비드: {context_meta.get('bead_type','?')}"
         f"{(' / 판: ' + context_meta.get('plate_thickness') + 'mm') if context_meta.get('plate_thickness') else ''}\n"
+        f"- 조인트 유형: {'필릿(Fillet)' if is_fillet else '맞대기(Butt)'}\n"
         f"- AI 최종 점수: {weld_data.get('final_score','?')}점 / 판정: {weld_data.get('is_pass','?')}\n"
+        f"- 검출 결함: {defect_str}\n"
+    )
+
+    if is_fillet and fillet_data:
+        # ── 필릿 용접: 각장·목두께·볼록도 기준으로만 서술 ──
+        ul = fillet_data.get("unequalLeg", {})
+        fillet_scores = weld_data.get("fillet_scores", {})
+        measurements = (
+            f"[필릿 용접 측정값]\n"
+            f"- 등각장(Z): {fillet_data.get('equalLeg', '-')}mm\n"
+            f"- 수직 각장(Z1): {ul.get('z1', '-')}mm"
+            f" / 수평 각장(Z2): {ul.get('z2', '-')}mm\n"
+            f"- 부등각장 여부: "
+            + (
+                f"예 (차이 {ul.get('difference', '?')}mm)"
+                if ul.get("isUnequal", False) else "아니오"
+            )
+            + f"\n"
+            f"- 이론 목두께(a): {fillet_data.get('theoreticalThroat', '-')}mm\n"
+            f"- 실제 목두께(a): {fillet_data.get('actualThroat', '-')}mm\n"
+            f"- 비드 형상: {fillet_data.get('convexity', {}).get('type', 'unknown')}"
+            f" ({fillet_data.get('convexity', {}).get('value_mm', 0)}mm)\n"
+        )
+        if fillet_scores:
+            measurements += (
+                f"[필릿 채점 세부]\n"
+                f"- 각장 균일성: {fillet_scores.get('leg_score', '?')}점\n"
+                f"- 목두께 달성률: {fillet_scores.get('throat_score', '?')}점\n"
+                f"- 부등각장 감점: {fillet_scores.get('unequal_score', '?')}점\n"
+                f"- 볼록도: {fillet_scores.get('convex_score', '?')}점\n"
+                f"- 종합: {fillet_scores.get('fillet_total_score', '?')}점\n"
+            )
+        return header + measurements
+
+    # ── 맞대기(Butt) 용접: 비드폭·직진도·높이 기준 ──
+    width_var = weld_data.get("width_variance", 0)
+    straight_var = weld_data.get("straightness_variance", 0)
+    height_var = weld_data.get("height_variance")
+    height_line = (
+        f"\n- 높이 편차: {height_var}mm (측면 사진)"
+        if height_var is not None
+        else (
+            "\n- 비드 높이: 측면 사진 미업로드로 측정 불가 — "
+            "이번 진단에서는 높이 관련 언급을 일절 하지 마세요."
+        )
+    )
+    butt_measurements = (
         f"- 비드 폭 편차 (사진 평균): {width_var}mm\n"
         f"- 직진도 이탈 (사진 평균): {straight_var}mm{height_line}\n"
-        f"- 검출 결함: {defect_str}\n"
         f"- 비드 종합 점수 (사진별 평균): {weld_data.get('bead_total_score','?')}점 "
         f"(폭{weld_data.get('width_score','?')}/직진{weld_data.get('straightness_score','?')}"
         f"{('/높이' + str(weld_data.get('height_score'))) if weld_data.get('height_score') is not None else ''})\n"
-        + (
-            (
-                f"[필렛 용접 분석]\n"
-                f"- 비드 표면 너비: {fillet_data.get('beadWidth')}mm\n"
-                f"- 등각장(Z): {fillet_data.get('equalLeg', '-')}mm\n"
-                f"- 수직 각장(Z1): {fillet_data.get('unequalLeg', {}).get('z1', '-')}mm"
-                f" / 수평 각장(Z2): {fillet_data.get('unequalLeg', {}).get('z2', '-')}mm\n"
-                f"- 부등각장 여부: "
-                + (
-                    f"{'예 (차이 ' + str(fillet_data.get('unequalLeg', {}).get('difference', '?')) + 'mm)'}"
-                    if fillet_data.get('unequalLeg', {}).get('isUnequal', False)
-                    else "아니오"
-                )
-                + f"\n"
-                f"- 이론 목두께: {fillet_data.get('theoreticalThroat')}mm\n"
-                f"- 실제 목두께: {fillet_data.get('actualThroat', '-')}mm\n"
-                f"- 비드 형상: {fillet_data.get('convexity', {}).get('type', 'unknown')}"
-                f" ({fillet_data.get('convexity', {}).get('value_mm', 0)}mm)\n"
-            )
-            if fillet_data else ""
-        )
     )
+    return header + butt_measurements
 
 
 def _summarize_per_photo(per_photo_bead: dict) -> str:
@@ -189,7 +227,13 @@ async def get_expert_advice(
         raise ValueError("get_expert_advice requires at least 1 image (front)")
 
     n_photos = len(images)
-    system_prompt = _build_system_prompt(language_name, has_side_photo=has_side_photo, n_photos=n_photos)
+    is_fillet = context_meta.get("is_fillet", False) if context_meta else False
+    system_prompt = _build_system_prompt(
+        language_name,
+        has_side_photo=has_side_photo,
+        n_photos=n_photos,
+        is_fillet=is_fillet,
+    )
 
     # ── Ground-Truth 주입: 재분석 시 확정 실측 데이터를 system 영역에 강제 삽입 ──
     if measurement_ground_truth and measurement_ground_truth.strip():

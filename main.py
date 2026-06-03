@@ -588,6 +588,7 @@ def calculate_fillet_analysis(vision_data: dict, ppm: float, is_fillet: bool):
     actual_throat      = round(theoretical_throat + convexity.get("value_mm", 0), 2)
 
     return {
+        "status":            "success",   # welding_calculator 채점 분기 진입 조건
         "beadWidth":         W,
         "equalLeg":          equal_leg,
         "theoreticalThroat": theoretical_throat,
@@ -730,6 +731,7 @@ async def analyze_welding_full(
         "bead_type":       bead_type,
         "pass_type":       pass_type,
         "plate_thickness": plate_thickness,
+        "is_fillet":       is_fillet_bool,  # LLM 조인트별 프롬프트 분기용
     }
     expert_advice = {}
     if analysis_mode != "quick":

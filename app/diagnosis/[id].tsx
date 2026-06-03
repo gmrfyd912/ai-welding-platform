@@ -1290,7 +1290,7 @@ export default function DiagnosisScreen() {
           const zeroY = PAD_Y + plotH - ((0 - minH) / rangeH) * plotH;
 
           return (
-            <SectionCard title="레이저 비드 형상 분석" icon="pulse-outline">
+            <SectionCard title="레이저 비드 형상 분석" icon="chart-bell-curve-cumulative">
               {/* 교차검증 신뢰도 (confidence_score) */}
               {la.is_cross_validated && la.confidence_score != null && (
                 <View style={{ marginBottom: 12, gap: 6 }}>
@@ -1326,11 +1326,25 @@ export default function DiagnosisScreen() {
                   )}
                 </View>
               )}
+              {/* 필릿: "높이" = 비드 표면 볼록/오목 정도 → 라벨 변경
+                  맞대기: "높이" = 여고(Reinforcement Height) → 기존 라벨 유지 */}
               <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-                <StatCard label="최대 높이" value={`${la.beadHeightMax.toFixed(2)}mm`} />
-                <StatCard label="최소 높이" value={`${la.beadHeightMin.toFixed(2)}mm`} />
-                <StatCard label="평균 높이" value={`${la.beadHeightAvg.toFixed(2)}mm`} />
-                <StatCard label="높이 편차" value={`${la.heightVariance.toFixed(2)}mm`} />
+                <StatCard
+                  label={result.filletAnalysis ? "최대 볼록량" : "최대 높이"}
+                  value={`${la.beadHeightMax.toFixed(2)}mm`}
+                />
+                <StatCard
+                  label={result.filletAnalysis ? "최소 볼록량" : "최소 높이"}
+                  value={`${la.beadHeightMin.toFixed(2)}mm`}
+                />
+                <StatCard
+                  label={result.filletAnalysis ? "평균 볼록량" : "평균 높이"}
+                  value={`${la.beadHeightAvg.toFixed(2)}mm`}
+                />
+                <StatCard
+                  label={result.filletAnalysis ? "볼록 편차" : "높이 편차"}
+                  value={`${la.heightVariance.toFixed(2)}mm`}
+                />
               </View>
 
               <View style={{
