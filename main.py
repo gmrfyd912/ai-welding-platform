@@ -30,7 +30,7 @@ REAL_MARKER_SIZE_MM = 30.0
 # 시작 시 어떤 모델/마커 크기로 동작 중인지 콘솔에 명시
 # (env var 를 바꿔도 워크플로 재시작 전엔 옛 값이 그대로 남으므로 헷갈림 방지)
 print(f"[Init] Roboflow model = '{ROBOFLOW_MODEL}' | marker = {REAL_MARKER_SIZE_MM}mm | "
-      f"API key {'설정됨' if ROBOFLOW_API_KEY else '⚠️ 미설정'}")
+      f"API key {'설정됨' if ROBOFLOW_API_KEY else '[!] 미설정'}")
 
 openai_client    = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
 anthropic_client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
@@ -469,7 +469,7 @@ def _inject_marker_fallback(robo_data: dict, aruco_info: dict, label: str) -> di
     preds.append(synth)
     robo_data["predictions"] = preds
     print(f"[ArUco→Roboflow:{label}] 마커 폴백 주입 "
-          f"({marker_px:.0f}px, ppm={marker_px / 30.0:.2f}) — "
+          f"({marker_px:.0f}px, ppm={marker_px / 30.0:.2f}) - "
           f"Roboflow 가 Reference_Marker 를 못 잡았지만 OpenCV ArUco 검출값으로 대체")
     return robo_data
 
@@ -669,7 +669,7 @@ async def analyze_welding_full(
         side_vision_data = analyze_bead_dimensions(side_preds, is_pipe=is_pipe,
                                                    pipe_outer_diameter_mm=pipe_od_mm)
         if side_vision_data.get("status") == "error":
-            print(f"[Vision:side] 미탐지 — 높이 점수 제외: {side_vision_data.get('message')}")
+            print(f"[Vision:side] 미탐지 - 높이 점수 제외: {side_vision_data.get('message')}")
             side_vision_data = None
         else:
             print(f"[Vision:side] 높이 편차 {side_vision_data['bead_width_max'] - side_vision_data['bead_width_min']:.2f}mm")
@@ -685,11 +685,11 @@ async def analyze_welding_full(
         back_vision_data = analyze_bead_dimensions(back_preds, is_pipe=is_pipe,
                                                    pipe_outer_diameter_mm=pipe_od_mm)
         if back_vision_data.get("status") == "error":
-            print(f"[Vision:back] 미탐지 — 이면 결함 0개로 처리: {back_vision_data.get('message')}")
+            print(f"[Vision:back] 미탐지 - 이면 결함 0개로 처리: {back_vision_data.get('message')}")
             back_vision_data = None
         else:
             n_back_def = len(back_vision_data.get("defects_info", []))
-            print(f"[Vision:back] 이면 결함 {n_back_def}개 검출 — 감점에 합산")
+            print(f"[Vision:back] 이면 결함 {n_back_def}개 검출 - 감점에 합산")
 
     # ── 4. welding_calculator: 새 시그니처로 점수 계산 ──────────────
     weld_data = calculate_weld_score(
@@ -746,7 +746,7 @@ async def analyze_welding_full(
             print(f"[GPT Advisor] 리포트 {rep_len}자 / 개선책 {n_imp}개 / "
                   f"이력 {'있음' if user_history else '없음'} / 사진 {len(gpt_images)}장 종합")
         except Exception as e:
-            print(f"[GPT Advisor] 오류: {e} — 측정값 기반 폴백 리포트로 대체")
+            print(f"[GPT Advisor] 오류: {e} - 측정값 기반 폴백 리포트로 대체")
 
     # ── 6. 명장 마크다운 리포트 (vision 측정값 기반) ────────────────
     raw_defects_for_report = [
@@ -900,14 +900,14 @@ async def analyze_welding_full(
         ])
         if not comprehensive_report or len(comprehensive_report) < 50:
             comprehensive_report = _build_fallback_report(weld_data, context_meta, has_side_photo)
-            print(f"[GPT Advisor] 폴백 리포트 생성 — {len(comprehensive_report)}자")
+            print(f"[GPT Advisor] 폴백 리포트 생성 - {len(comprehensive_report)}자")
         top3_defects = _extract_list(expert_advice, ["top3Defects", "주요결함", "top_defects"])
         if top3_defects == ["전문가 분석이 완료되었습니다. 상세 리포트를 확인하세요."]:
             top3_defects = weld_data["detected_defects"][:3]
 
-    print(f"━━ 최종: aiScore={weld_data['final_score']} | 판정={weld_data['is_pass']} | "
+    print(f"== 최종: aiScore={weld_data['final_score']} | 판정={weld_data['is_pass']} | "
           f"비드={weld_data['bead_total_score']} (폭{weld_data['width_score']}/직진{weld_data['straightness_score']}"
-          f"{('/높이' + str(weld_data['height_score'])) if weld_data['height_score'] is not None else ''}) ━━")
+          f"{('/높이' + str(weld_data['height_score'])) if weld_data['height_score'] is not None else ''}) ==")
 
     # photoAnalyses: 탭별 데이터 — 각 탭이 그 사진의 비드/결함/히트맵을 독립 표시
     # 사진이 업로드됐으나 vision 분석이 실패한 경우(비드 미식별 등)에도
