@@ -6,14 +6,20 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "development"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "preview"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production"
     }
+  },
+  "update": {
+    "url": "https://u.expo.dev/6fd828ae-d379-48cd-91e0-103ed5af8e7e"
   },
   "submit": {
     "production": {}

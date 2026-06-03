@@ -3,6 +3,15 @@
     "name": "AI 용접 진단",
     "slug": "ai-welding-diagnosis",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD",
+      "url": "https://u.expo.dev/6fd828ae-d379-48cd-91e0-103ed5af8e7e"
+    },
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "aiwelding",

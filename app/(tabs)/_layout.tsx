@@ -1,12 +1,54 @@
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
 import { BlurView } from "expo-blur";
-import { Platform, StyleSheet, View } from "react-native";
-import React from "react";
+import { Alert, Platform, StyleSheet, View } from "react-native";
+import React, { useEffect } from "react";
+import * as Updates from "expo-updates";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useLanguage } from "@/context/LanguageContext";
 import { useAuth } from "@/context/AuthContext";
+
+/**
+ * OTA 업데이트 자동 감지 훅.
+ * 앱 구동 시 백그라운드에서 새 업데이트를 확인하고,
+ * 다운로드 완료 후 사용자에게 재시작 여부를 물어본다.
+ * __DEV__ 환경(로컬 개발)에서는 동작하지 않는다.
+ */
+function useAppUpdater(): void {
+  useEffect(() => {
+    if (__DEV__) return;
+
+    async function checkAndApply() {
+      try {
+        const result = await Updates.checkForUpdateAsync();
+        if (!result.isAvailable) return;
+
+        await Updates.fetchUpdateAsync();
+
+        Alert.alert(
+          "업데이트 완료",
+          "새로운 기능이 추가되었습니다. 앱을 재시작하여 적용하시겠습니까?",
+          [
+            { text: "나중에", style: "cancel" },
+            {
+              text: "재시작",
+              onPress: () => Updates.reloadAsync().catch((e) =>
+                console.warn("[OTA] reloadAsync 오류:", e)
+              ),
+            },
+          ],
+          { cancelable: false },
+        );
+      } catch (e) {
+        // 네트워크 오류 등은 조용히 무시
+        console.warn("[OTA] 업데이트 확인 중 오류:", e);
+      }
+    }
+
+    checkAndApply();
+  }, []);
+}
 
 function NativeTabLayout() {
   const { t } = useLanguage();
@@ -112,6 +154,7 @@ function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
+  useAppUpdater(); // OTA 업데이트 자동 감지 (배포 환경 전용)
   if (isLiquidGlassAvailable()) {
     return <NativeTabLayout />;
   }
