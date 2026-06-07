@@ -911,6 +911,8 @@ export default function DiagnosisScreen() {
             aiScore:         result.aiScore,
             overallVerdict:  result.overallVerdict,
             beadAnalysis:    result.beadAnalysis,
+            // 사진별 비드 분석 (히트맵 수치 = 화면 표시값 원본)
+            photoAnalyses:   result.photoAnalyses ?? null,
             defects:         result.defects,
             top3Defects:     result.top3Defects,
             trendScores:     result.trendScores,
@@ -920,6 +922,7 @@ export default function DiagnosisScreen() {
             material:        result.material,
             beadType:        result.beadType ?? null,
             passType:        (result as any).passType ?? null,
+            isFillet:        !!result.filletAnalysis,
             improvements:    result.improvements,
             defectLocations: result.defectLocations ?? [],
           },

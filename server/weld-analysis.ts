@@ -64,11 +64,15 @@ const MOCK_LASER_ANALYSIS = {
   ],
 } as const;
 
+// MOCK_FILLET_ANALYSIS 수식 정합성 규칙:
+//   actualThroat = theoreticalThroat + convexity.value_mm
+//   4.56         = 4.81             + (-0.25)  ← 수식 일치 ✓
+//   actualThroat < theoreticalThroat → convexity.type = "concave" ✓
 const MOCK_FILLET_ANALYSIS = {
   beadWidth:          9.2,
-  equalLeg:           6.8,
-  theoreticalThroat:  4.81,
-  actualThroat:       4.56,
+  equalLeg:           6.51,              // 9.2 × 0.7071
+  theoreticalThroat:  4.60,              // 6.51 × 0.7071
+  actualThroat:       4.35,              // 4.60 + (-0.25) = 4.35
   unequalLeg: {
     z1:        7.1,
     z2:        6.5,
@@ -76,8 +80,8 @@ const MOCK_FILLET_ANALYSIS = {
     difference: 0.6,
   },
   convexity: {
-    type:     "convex",
-    value_mm: 1.4,
+    type:     "concave",                 // actual(4.35) < theoretical(4.60) → concave ✓
+    value_mm: -0.25,                     // 4.60 + (-0.25) = 4.35 ✓
   },
   note: "[MOCK 가상 데이터 — 실제 필릿 측정값이 아님]",
 } as const;
@@ -372,7 +376,9 @@ export function registerWeldAnalysisRoute(app: Express): void {
       const ctxLines: string[] = [
         "=== 1차 비전 측정 Ground-Truth ===",
         "경고: 아래 수치는 비전 AI가 확정한 실측값이다.",
-        "반드시 이 값들만 100% 동일하게 인용하라. 없는 수치를 지어내거나 추측하는 것은 금지다.",
+        "히트맵·시각적 분석 화면에 표시된 수치와 100% 동일한 값이다.",
+        "리포트 작성 시 반드시 이 수치들을 소수점 둘째 자리까지 정확히 그대로 인용하라.",
+        "아래에 없는 수치를 지어내거나(Hallucination) 반올림·변형하여 쓰는 것은 금지다.",
         "",
         "[기본 정보]",
         kv("AI점수",     fv.aiScore    ?? row.ai_score),
@@ -386,11 +392,23 @@ export function registerWeldAnalysisRoute(app: Express): void {
       ].filter(Boolean) as string[];
 
       if (beadSrc) {
-        ctxLines.push("", "[비드 분석]");
+        ctxLines.push("", "[비드 분석 — 화면 히트맵 표시값과 동일]");
         if (kv("비드총점",   beadSrc.totalScore))      ctxLines.push(kv("비드총점", beadSrc.totalScore)!);
         if (beadSrc.width)       ctxLines.push(`  비드폭: ${beadSrc.width.value} (${beadSrc.width.score}점)`);
         if (beadSrc.straightness) ctxLines.push(`  직진도: ${beadSrc.straightness.value} (${beadSrc.straightness.score}점)`);
         if (beadSrc.height)      ctxLines.push(`  비드높이: ${beadSrc.height.value} (${beadSrc.height.score}점)`);
+      }
+
+      // 사진별 히트맵 수치 (front/side/back 각각 독립 측정값)
+      const photoAnalyses = fv.photoAnalyses as Record<string, any> | null | undefined;
+      if (photoAnalyses) {
+        const viewLabel: Record<string, string> = { front: "정면", side: "측면", back: "이면" };
+        for (const view of ["front", "side", "back"] as const) {
+          const pa = photoAnalyses[view];
+          if (!pa?.beadAnalysis) continue;
+          const ba = pa.beadAnalysis;
+          ctxLines.push(`  [${viewLabel[view]} 히트맵] 비드폭=${ba.width?.value ?? "-"} (${ba.width?.score ?? "-"}점) / 직진도=${ba.straightness?.value ?? "-"} (${ba.straightness?.score ?? "-"}점)`);
+        }
       }
 
       if (top3Src.length > 0) {

@@ -532,10 +532,17 @@ def calculate_convexity(vision_data: dict) -> dict:
     if not lines:
         return {"type": "unknown", "value_mm": 0}
     deviation = lines[0].get("deviation_mm", 0)
+    # ±0.2mm 이내는 "flat"으로 분류 (측정 오차 범위)
+    if abs(deviation) < 0.2:
+        ctype = "flat"
+    elif deviation > 0:
+        ctype = "convex"
+    else:
+        ctype = "concave"
     return {
-        "type": "convex" if deviation > 0 else "concave",
-        "value_mm": round(deviation, 2),
-        "note": "레이저 있을 때 더 정확한 측정 가능",
+        "type":     ctype,
+        "value_mm": round(deviation, 2),  # 양수=볼록, 음수=오목
+        "note":     "레이저 있을 때 더 정확한 측정 가능",
     }
 
 
@@ -581,18 +588,28 @@ def calculate_fillet_analysis(vision_data: dict, ppm: float, is_fillet: bool):
     if W <= 0:
         return None
 
-    equal_leg          = round(W * 0.7071, 2)
-    theoretical_throat = round(W / 2, 2)
-    unequal_leg        = calculate_unequal_legs(vision_data, ppm)
-    convexity          = calculate_convexity(vision_data)
-    actual_throat      = round(theoretical_throat + convexity.get("value_mm", 0), 2)
+    # 등각장: 비드 표면 너비 × sin45°
+    equal_leg = round(W * 0.7071, 2)
+
+    # 이론 목두께: 등각장 × sin45° (= 비드폭/2, 45° 등각장 기준)
+    theoretical_throat = round(equal_leg * 0.7071, 2)
+
+    unequal_leg = calculate_unequal_legs(vision_data, ppm)
+    convexity   = calculate_convexity(vision_data)
+
+    # 실제 목두께 = 이론 목두께 + 볼록량(볼록:+, 오목:-)
+    # 수식 정합성: actualThroat = theoreticalThroat + convexity.value_mm
+    #   convex(+) → actualThroat > theoreticalThroat
+    #   concave(-) → actualThroat < theoreticalThroat
+    #   flat(0) → actualThroat ≈ theoreticalThroat
+    actual_throat = round(theoretical_throat + convexity.get("value_mm", 0), 2)
 
     return {
         "status":            "success",   # welding_calculator 채점 분기 진입 조건
         "beadWidth":         W,
         "equalLeg":          equal_leg,
         "theoreticalThroat": theoretical_throat,
-        "actualThroat":      actual_throat,
+        "actualThroat":      actual_throat,   # = theoreticalThroat + convexity.value_mm
         "unequalLeg":        unequal_leg,
         "convexity":         convexity,
         "note":              "부등각장은 Roboflow 정확도에 따라 오차 있을 수 있음",
