@@ -910,7 +910,8 @@ export default function DiagnosisScreen() {
           visionData: {
             aiScore:         result.aiScore,
             overallVerdict:  result.overallVerdict,
-            beadAnalysis:    result.beadAnalysis,
+            // SSoT: 현재 선택된 사진탭의 비드분석값 — UI 텍스트·히트맵·페이로드 모두 동일 변수
+            beadAnalysis:    currentPhotoAnalysis?.beadAnalysis ?? result.beadAnalysis,
             // 사진별 비드 분석 (히트맵 수치 = 화면 표시값 원본)
             photoAnalyses:   result.photoAnalyses ?? null,
             defects:         result.defects,
@@ -1061,19 +1062,22 @@ export default function DiagnosisScreen() {
         {/* ── 비드/필릿 분석 (용접 종류에 따라 동적 분기) ── */}
         {result.filletAnalysis ? (() => {
           const fa = result.filletAnalysis!;
-          const scoreColor = (s: number) =>
-            s >= 90 ? Colors.primary : s >= 75 ? Colors.success : s >= 60 ? Colors.warning : Colors.danger;
-          const convexColor = fa.convexity.type === "convex" ? Colors.warning
-            : fa.convexity.type === "concave" ? Colors.danger : Colors.success;
+          // 레이저 데이터 (없으면 null — 모든 레이저 비교 sub는 이 변수 존재 여부로 분기)
+          const la = result.laserAnalysis?.status === "success" ? result.laserAnalysis : null;
+          // SSoT: 현재 선택된 사진탭의 비드 분석값 → UI·히트맵·페이로드 모두 이 변수 사용
+          const beadSrc = currentPhotoAnalysis?.beadAnalysis ?? result.beadAnalysis;
           const convexLabel = fa.convexity.type === "convex" ? "볼록"
             : fa.convexity.type === "concave" ? "오목" : "평탄";
-          const filletRows: Array<{ label: string; value: string; score?: number }> = [
-            { label: "등각장 (Z)", value: `${fa.equalLeg}mm` },
-            { label: "수직 각장 (Z1)", value: fa.unequalLeg.z1 != null ? `${fa.unequalLeg.z1}mm` : "-" },
-            { label: "수평 각장 (Z2)", value: fa.unequalLeg.z2 != null ? `${fa.unequalLeg.z2}mm` : "-" },
-            { label: "이론 목두께", value: `${fa.theoreticalThroat}mm` },
-            { label: "실제 목두께", value: `${fa.actualThroat}mm` },
-          ];
+          // 레이저 기반 실제 목두께: theoreticalThroat + laser 볼록 편차(부호 포함)
+          const laserConvMm = la
+            ? (la.convexity === "concave" ? -la.convexityMm : la.convexity === "flat" ? 0 : la.convexityMm)
+            : null;
+          const laserActualThroat = laserConvMm != null
+            ? Math.round((fa.theoreticalThroat + laserConvMm) * 100) / 100
+            : null;
+          const stSt = (s: number): MeasureStatus =>
+            s >= 80 ? "good" : s >= 65 ? "warn" : "bad";
+
           return (
             <SectionCard
               title="필릿 비드 분석"
@@ -1091,83 +1095,116 @@ export default function DiagnosisScreen() {
                   <ExpoImage source={{ uri: selectedPhotoUri }} style={styles.sectionPhotoThumb} contentFit="cover" />
                 </>
               )}
-              {/* ── 각장 / 목두께 — 2단 그리드 ── */}
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                <MeasureCard
-                  icon="vector-triangle"
-                  label="등각장 (Z)"
-                  value={`${fa.equalLeg}mm`}
-                  sub="기준: 모재두께×0.7 이상"
-                  status="info"
-                />
-                <MeasureCard
-                  icon="arrow-expand-horizontal"
-                  label="비드 표면너비"
-                  value={`${fa.beadWidth}mm`}
-                  status="info"
-                />
-              </View>
+              {/* [1행] 수직 각장(Z1) | 수평 각장(Z2) */}
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <MeasureCard
                   icon="ray-start-arrow"
                   label="수직 각장 (Z1)"
                   value={fa.unequalLeg.z1 != null ? `${fa.unequalLeg.z1}mm` : "-"}
+                  sub={la ? "레이저: -" : undefined}
                   status="info"
                 />
                 <MeasureCard
                   icon="ray-end-arrow"
                   label="수평 각장 (Z2)"
                   value={fa.unequalLeg.z2 != null ? `${fa.unequalLeg.z2}mm` : "-"}
+                  sub={la ? "레이저: -" : undefined}
                   status="info"
                 />
               </View>
+              {/* [2행] 부등각장 | 비드 표면너비 */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <MeasureCard
+                  icon={fa.unequalLeg.isUnequal ? "alert" : "check-circle"}
+                  label="부등각장"
+                  value={fa.unequalLeg.isUnequal ? `차이 ${fa.unequalLeg.difference ?? "?"}mm` : "균등"}
+                  sub={la ? "레이저: -" : "참고용 (폴리곤 기반)"}
+                  status={fa.unequalLeg.isUnequal ? "warn" : "good"}
+                />
+                <MeasureCard
+                  icon="arrow-expand-horizontal"
+                  label="비드 표면너비"
+                  value={`${fa.beadWidth}mm`}
+                  sub={la ? "레이저: -" : undefined}
+                  status="info"
+                />
+              </View>
+              {/* [3행] 이론 목두께 | 실제 목두께 */}
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <MeasureCard
                   icon="layers-outline"
                   label="이론 목두께"
                   value={`${fa.theoreticalThroat}mm`}
-                  sub="계산값"
+                  sub={la ? "레이저: -" : "등각장 × 0.707"}
                   status="info"
                 />
                 <MeasureCard
                   icon="layers"
                   label="실제 목두께"
                   value={`${fa.actualThroat}mm`}
-                  sub={fa.actualThroat >= fa.theoreticalThroat * 0.9 ? "정상" : "기준 미달"}
+                  sub={laserActualThroat != null
+                    ? `레이저: ${laserActualThroat}mm`
+                    : (fa.actualThroat >= fa.theoreticalThroat * 0.9 ? "정상" : "기준 미달")}
                   status={fa.actualThroat >= fa.theoreticalThroat * 0.9 ? "good" : "bad"}
                 />
               </View>
+              {/* [4행] 비드 형상 | 비드 직진도 */}
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <MeasureCard
                   icon={fa.convexity.type === "flat" ? "minus" : fa.convexity.type === "convex" ? "arrow-up-bold" : "arrow-down-bold"}
                   label="비드 형상"
                   value={convexLabel}
-                  sub={`${fa.convexity.value_mm}mm`}
+                  sub={la
+                    ? `레이저: ${la.convexity === "convex" ? "볼록" : la.convexity === "concave" ? "오목" : "평탄"} ${la.convexityMm.toFixed(2)}mm`
+                    : `${fa.convexity.value_mm}mm`}
                   status={fa.convexity.type === "flat" ? "good" : fa.convexity.type === "convex" ? "warn" : "bad"}
                 />
-                <MeasureCard
-                  icon={fa.unequalLeg.isUnequal ? "alert" : "check-circle"}
-                  label="부등각장"
-                  value={fa.unequalLeg.isUnequal ? `차이 ${fa.unequalLeg.difference ?? "?"}mm` : "균등"}
-                  sub="참고용 (폴리곤 기반)"
-                  status={fa.unequalLeg.isUnequal ? "warn" : "good"}
-                />
+                {beadSrc?.straightness && (() => {
+                  const sc = beadSrc.straightness.score;
+                  return (
+                    <MeasureCard
+                      icon="ray-start-end"
+                      label="비드 직진도"
+                      value={beadSrc.straightness.value}
+                      score={sc}
+                      sub={la ? "레이저: -" : undefined}
+                      status={stSt(sc)}
+                    />
+                  );
+                })()}
               </View>
-              {/* 직진도 (필릿 포함) */}
-              {currentPhotoAnalysis?.beadAnalysis && (() => {
-                const ba = currentPhotoAnalysis.beadAnalysis!;
-                const sc = ba.straightness.score;
-                const st: MeasureStatus = sc >= 80 ? "good" : sc >= 65 ? "warn" : "bad";
-                return (
-                  <MeasureCard
-                    icon="ray-start-end"
-                    label={t("bead_straightness")}
-                    value={ba.straightness.value}
-                    score={sc}
-                    status={st}
-                  />
-                );
-              })()}
+              {/* [5행] 비드 폭 균일성 | 비드 높이 균일성 */}
+              {(beadSrc?.width || beadSrc?.height || la) && (
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {beadSrc?.width && (() => {
+                    const sc = beadSrc.width.score;
+                    return (
+                      <MeasureCard
+                        icon="arrow-expand-horizontal"
+                        label="비드 폭 균일성"
+                        value={beadSrc.width.value}
+                        score={sc}
+                        sub={la ? "레이저: -" : undefined}
+                        status={stSt(sc)}
+                      />
+                    );
+                  })()}
+                  {(beadSrc?.height || la) && (() => {
+                    const heightVal = beadSrc?.height?.value ?? (la ? `${la.beadHeightAvg.toFixed(2)}mm` : "-");
+                    const sc = beadSrc?.height?.score;
+                    return (
+                      <MeasureCard
+                        icon="arrow-expand-vertical"
+                        label="비드 높이 균일성"
+                        value={heightVal}
+                        score={sc}
+                        sub={la ? `레이저 편차: ${la.heightVariance.toFixed(2)}mm` : undefined}
+                        status={sc != null ? stSt(sc) : "info"}
+                      />
+                    );
+                  })()}
+                </View>
+              )}
             </SectionCard>
           );
         })() : (
@@ -1261,152 +1298,6 @@ export default function DiagnosisScreen() {
             )}
           </SectionCard>
         )}
-
-        {result.laserAnalysis?.status === "success" && (() => {
-          const la = result.laserAnalysis!;
-          const convexColor =
-            la.convexity === "convex" ? "#f97316"
-            : la.convexity === "concave" ? "#3b82f6"
-            : Colors.success;
-          const convexBg =
-            la.convexity === "convex" ? "#fff7ed"
-            : la.convexity === "concave" ? "#eff6ff"
-            : "#f0fdf4";
-          const convexLabel =
-            la.convexity === "convex"
-              ? `볼록 (Convex) +${la.convexityMm.toFixed(2)}mm`
-              : la.convexity === "concave"
-              ? `오목 (Concave) -${la.convexityMm.toFixed(2)}mm`
-              : "평탄 (Flat)";
-
-          const profile = la.profile ?? [];
-          const LASER_W = SCREEN_W - 64;
-          const LASER_H = 80;
-          const PAD_X = 8;
-          const PAD_Y = 8;
-          const plotW = LASER_W - PAD_X * 2;
-          const plotH = LASER_H - PAD_Y * 2;
-          const allH = profile.map((p) => p.height_mm);
-          const minH = Math.min(...allH, 0);
-          const maxH = Math.max(...allH, 0.01);
-          const rangeH = maxH - minH || 0.01;
-          const zeroY = PAD_Y + plotH - ((0 - minH) / rangeH) * plotH;
-
-          return (
-            <SectionCard title="레이저 비드 형상 분석" icon="chart-bell-curve-cumulative">
-              {/* 교차검증 신뢰도 (confidence_score) */}
-              {la.is_cross_validated && la.confidence_score != null && (
-                <View style={{ marginBottom: 12, gap: 6 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                    <Text style={{ color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 12 }}>
-                      AI 레이저 교차검증 신뢰도
-                    </Text>
-                    <Text style={{
-                      color: la.confidence_score >= 80 ? Colors.success : la.confidence_score >= 60 ? Colors.warning : Colors.danger,
-                      fontFamily: "Inter_700Bold",
-                      fontSize: 13,
-                    }}>
-                      {la.confidence_score.toFixed(1)}%
-                    </Text>
-                  </View>
-                  <View style={{ height: 6, backgroundColor: Colors.surface, borderRadius: 3, overflow: "hidden" }}>
-                    <View style={{
-                      height: "100%",
-                      borderRadius: 3,
-                      width: `${Math.min(100, la.confidence_score)}%`,
-                      backgroundColor: la.confidence_score >= 80 ? Colors.success : la.confidence_score >= 60 ? Colors.warning : Colors.danger,
-                    }} />
-                  </View>
-                  {(la.segment_errors?.some((e) => e.is_outlier) ?? false) && (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6,
-                      backgroundColor: Colors.warning + "18", borderRadius: 8,
-                      paddingHorizontal: 10, paddingVertical: 5, alignSelf: "flex-start" }}>
-                      <Ionicons name="warning-outline" size={13} color={Colors.warning} />
-                      <Text style={{ color: Colors.warning, fontFamily: "Inter_500Medium", fontSize: 12 }}>
-                        AI 레이저 오차 보정됨 ({la.segment_errors!.filter((e) => e.is_outlier).length}개 구간)
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
-              {/* 필릿: "높이" = 비드 표면 볼록/오목 정도 → 라벨 변경
-                  맞대기: "높이" = 여고(Reinforcement Height) → 기존 라벨 유지 */}
-              <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-                <StatCard
-                  label={result.filletAnalysis ? "최대 볼록량" : "최대 높이"}
-                  value={`${la.beadHeightMax.toFixed(2)}mm`}
-                />
-                <StatCard
-                  label={result.filletAnalysis ? "최소 볼록량" : "최소 높이"}
-                  value={`${la.beadHeightMin.toFixed(2)}mm`}
-                />
-                <StatCard
-                  label={result.filletAnalysis ? "평균 볼록량" : "평균 높이"}
-                  value={`${la.beadHeightAvg.toFixed(2)}mm`}
-                />
-                <StatCard
-                  label={result.filletAnalysis ? "볼록 편차" : "높이 편차"}
-                  value={`${la.heightVariance.toFixed(2)}mm`}
-                />
-              </View>
-
-              <View style={{
-                alignSelf: "flex-start",
-                backgroundColor: convexBg,
-                borderRadius: 20,
-                paddingHorizontal: 14,
-                paddingVertical: 6,
-                marginBottom: 12,
-              }}>
-                <Text style={{ color: convexColor, fontFamily: "Inter_700Bold", fontSize: 13 }}>
-                  {convexLabel}
-                </Text>
-              </View>
-
-              {profile.length >= 2 && (
-                <View style={{ marginBottom: 10 }}>
-                  <Svg width={LASER_W} height={LASER_H + PAD_Y}>
-                    <Line
-                      x1={PAD_X} y1={zeroY}
-                      x2={LASER_W - PAD_X} y2={zeroY}
-                      stroke={Colors.border} strokeWidth="1" strokeDasharray="4,3"
-                    />
-                    {profile.map((pt, i) => {
-                      const barX = PAD_X + (pt.x_pct / 100) * plotW;
-                      const barH = Math.abs((pt.height_mm / rangeH) * plotH);
-                      const barY = pt.height_mm >= 0 ? zeroY - barH : zeroY;
-                      const barColor = pt.height_mm >= 0 ? "#f97316" : "#3b82f6";
-                      const barW = Math.max(2, plotW / profile.length - 1);
-                      return (
-                        <Line
-                          key={i}
-                          x1={barX} y1={barY + barH}
-                          x2={barX} y2={barY}
-                          stroke={barColor} strokeWidth={barW}
-                          strokeLinecap="round"
-                        />
-                      );
-                    })}
-                  </Svg>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: PAD_X }}>
-                    <Text style={{ color: Colors.textMuted, fontSize: 10, fontFamily: "Inter_400Regular" }}>0%</Text>
-                    <Text style={{ color: Colors.textMuted, fontSize: 10, fontFamily: "Inter_400Regular" }}>비드 길이 방향</Text>
-                    <Text style={{ color: Colors.textMuted, fontSize: 10, fontFamily: "Inter_400Regular" }}>100%</Text>
-                  </View>
-                </View>
-              )}
-
-              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 12, marginBottom: 4 }}>
-                검출된 격자 간격: {la.laserGridSpacingMm.toFixed(2)}mm
-              </Text>
-              <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 11, fontStyle: "italic" }}>
-                레이저 각도 기반 삼각함수 계산값
-              </Text>
-            </SectionCard>
-          );
-        })()}
-
-        {/* 필릿 전용 SectionCard는 상단 동적 분기 섹션으로 통합됨 */}
 
         <SectionCard
           title={t("diag_defectEval")}
