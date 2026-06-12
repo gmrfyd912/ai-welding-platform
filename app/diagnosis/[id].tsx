@@ -839,11 +839,12 @@ export default function DiagnosisScreen() {
         {
           text: t("adm_delete"),
           style: "destructive",
-          onPress: async () => {
+          onPress: () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            await deleteResult(result.id);
+            // 먼저 화면 이탈 → "결과 없음" 깜빡임 방지, 삭제는 백그라운드 처리
             if (router.canGoBack()) router.back();
-            else router.replace("/(tabs)/");
+            else router.replace("/(tabs)/" as any);
+            deleteResult(result.id);
           },
         },
       ]
@@ -974,7 +975,7 @@ export default function DiagnosisScreen() {
         <Pressable
           onPress={() => {
             if (router.canGoBack()) router.back();
-            else router.replace("/(tabs)/");
+            else router.replace("/(tabs)/" as any);
           }}
           style={styles.backBtn}
         >
@@ -1060,8 +1061,31 @@ export default function DiagnosisScreen() {
         </View>
 
         {/* ── 비드/필릿 분석 (용접 종류에 따라 동적 분기) ── */}
-        {result.filletAnalysis ? (() => {
-          const fa = result.filletAnalysis!;
+        {/* isFillet: DB 저장 플래그 — filletAnalysis가 일시적으로 null이어도 필릿 UI 고정 */}
+        {(result.filletAnalysis || result.isFillet) ? (() => {
+          const fa = result.filletAnalysis ?? null;
+
+          // filletAnalysis 데이터 없음 (구형 레코드 또는 DB 마이그레이션 전 데이터)
+          if (!fa) {
+            return (
+              <SectionCard
+                title="필릿 비드 분석"
+                icon="set-square"
+                badge={
+                  <Pressable onPress={() => setShowScoringInfo(true)} style={styles.infoBtn} hitSlop={8}>
+                    <Ionicons name="information-circle-outline" size={18} color={Colors.primary} />
+                    <Text style={styles.infoBtnText}>평가 방식</Text>
+                  </Pressable>
+                }
+              >
+                <Text style={{ color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 13, textAlign: "center", paddingVertical: 16, lineHeight: 20 }}>
+                  필릿 분석 상세 데이터를 불러올 수 없습니다.{"\n"}
+                  AI 종합 분석 실행으로 재분석하세요.
+                </Text>
+              </SectionCard>
+            );
+          }
+
           // 레이저 데이터 (없으면 null — 모든 레이저 비교 sub는 이 변수 존재 여부로 분기)
           const la = result.laserAnalysis?.status === "success" ? result.laserAnalysis : null;
           // SSoT: 현재 선택된 사진탭의 비드 분석값 → UI·히트맵·페이로드 모두 이 변수 사용

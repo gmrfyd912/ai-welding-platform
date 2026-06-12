@@ -148,6 +148,7 @@ export interface WeldingResult {
   top3Defects: string[];
   trendScores: number[];
   filletAnalysis?: FilletAnalysis | null;
+  isFillet?: boolean;
   laserAnalysis?: {
     status: string;
     beadHeightMax: number;

@@ -8,6 +8,10 @@ const largeBodyParser = express.json({ limit: "30mb" });
 async function ensureColumns() {
   await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS user_course_name TEXT`);
   await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS bead_type TEXT`);
+  // 필릿·레이저 분석 데이터 영구 저장 컬럼 (DB 없으면 앱 재시작 시 UI 소실됨)
+  await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS fillet_analysis JSONB`);
+  await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS laser_analysis JSONB`);
+  await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS is_fillet BOOLEAN DEFAULT FALSE`);
 }
 ensureColumns().catch(console.error);
 
@@ -113,6 +117,10 @@ function rowToResult(row: any) {
     top3Defects: row.top3_defects,
     trendScores: row.trend_scores,
     timestamp: Number(row.timestamp),
+    // 필릿·레이저 분석: JSONB → pg가 자동 파싱, null이면 JS null 반환
+    filletAnalysis: row.fillet_analysis ?? null,
+    laserAnalysis: row.laser_analysis ?? null,
+    isFillet: row.is_fillet ?? false,
   };
 }
 
@@ -197,10 +205,12 @@ export function registerResultsRoutes(app: Express): void {
           process, process_custom, posture, posture_custom, material, material_custom,
           bead_type, self_score, ai_score, grade, overall_verdict,
           bead_analysis, defects, defect_locations, photo_analyses, improvements,
-          comprehensive_report, top3_defects, trend_scores, timestamp
+          comprehensive_report, top3_defects, trend_scores, timestamp,
+          fillet_analysis, laser_analysis, is_fillet
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-          $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
+          $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,
+          $28,$29,$30
         ) ON CONFLICT (id) DO NOTHING`,
         [
           r.id, r.userId, r.userName, r.userProfileUri ?? null, r.userCourseName ?? null,
@@ -215,6 +225,10 @@ export function registerResultsRoutes(app: Express): void {
           JSON.stringify(r.improvements ?? []),
           r.comprehensiveReport ?? null, JSON.stringify(r.top3Defects ?? []),
           JSON.stringify(r.trendScores ?? []), r.timestamp,
+          // 필릿·레이저: null이면 SQL NULL로 저장 (JSON.stringify(null)="null" 방지)
+          r.filletAnalysis ? JSON.stringify(r.filletAnalysis) : null,
+          r.laserAnalysis ? JSON.stringify(r.laserAnalysis) : null,
+          r.filletAnalysis ? true : false,
         ]
       );
       res.json({ success: true });
