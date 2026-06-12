@@ -23,31 +23,43 @@ _DICT_IDS = [
 
 
 def _preprocess_for_aruco(img: np.ndarray) -> np.ndarray:
-    """R 채널 분리로 녹색 레이저 간섭을 원천 제거한 탐지용 이진 이미지 반환.
+    """빛 포화 레이저 픽셀 강제 흑색화(Blackout Hack)로 마커 외곽선 복원.
 
     ⚠️  이 함수의 출력은 마커 코너 탐지에만 사용된다.
         호모그래피(와핑)와 레이저 프로파일 분석은 반드시
         원본 BGR 이미지(Original Image)로 진행해야 한다.
 
     파이프라인:
-      1. cv2.split(img) → R 채널만 채택, G 채널 폐기.
-         녹색 레이저(~532nm) : G 값 ≈ 255, R 값 ≈ 0
-         마커 흑색 패턴      : R 값 ≈ 0
-         마커 백색 패턴      : R 값 ≈ 255
-         → R 채널에서 레이저 선은 이미 마커 검정과 동일한 어두운 값.
-           별도 마스킹·형태학 연산 없이 자연 소거됨.
-      2. adaptiveThreshold (THRESH_BINARY, Gaussian, blockSize=15, C=4):
-         어두운 픽셀(마커 흑·레이저) → 0, 밝은 픽셀(마커 백·배경) → 255.
-         표준 ArUco 규격(어두운 마커, 밝은 배경)이 그대로 완성됨.
+      1. BGR → Grayscale 변환.
+      2. threshold(220, THRESH_BINARY) → laser_mask:
+         밝기 220 이상의 과노출 픽셀(레이저 중심부 포화 영역)을 255로 마킹.
+         녹색 레이저 중심은 RGB ≈ (255,255,255)에 가까워 Grayscale ≈ 250+.
+      3. adaptiveThreshold (THRESH_BINARY, Gaussian, blockSize=15, C=4)
+         → binary_img: 마커 탐지용 기본 이진화.
+      4. Blackout Hack:
+         binary_img[laser_mask > 0] = 0
+         포화 레이저 픽셀 → 완전 검정 강제 덮어씌우기.
+         끊어진 마커 외곽선이 검정으로 복원되고,
+         마커 내부 얇은 선은 ArUco 다수결 판독 로직이 무시함.
     """
-    _, _, r = cv2.split(img)
-    return cv2.adaptiveThreshold(
-        r, 255,
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # 과노출 레이저 픽셀 마스크 (밝기 220 이상)
+    _, laser_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
+
+    # 마커 탐지용 적응형 이진화
+    binary_img = cv2.adaptiveThreshold(
+        gray, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
         blockSize=15,
         C=4,
     )
+
+    # Blackout Hack: 포화 레이저 픽셀 → 0 (검정) 강제 덮어씌우기
+    binary_img[laser_mask > 0] = 0
+
+    return binary_img
 
 
 def _detect_largest_marker(gray: np.ndarray) -> Optional[np.ndarray]:
