@@ -22,6 +22,53 @@ _DICT_IDS = [
 ]
 
 
+def _remove_laser_lines(img: np.ndarray) -> np.ndarray:
+    """레이저 선을 인페인팅으로 제거한 새 이미지 반환 (마커 탐지 전처리 전용).
+
+    ⚠️  이 함수의 출력은 마커 코너 탐지에만 사용된다.
+        실제 레이저 프로파일 분석(analyze_laser_grid 등)에는
+        반드시 원본 이미지(Original Image)를 전달해야 한다.
+
+    HSV 임계값:
+      녹색 레이저 (현장 사용, ~532nm):
+        H 35–85 · S 80–255 · V 100–255
+      적색 레이저 (옵션, ~650nm) — 주석 처리:
+        H 0–10  · S 100–255 · V 100–255  (wraparound Range 1)
+        H 165–179 · S 100–255 · V 100–255 (wraparound Range 2)
+
+    팽창 커널: 5×5 Rect, 2회 → 얇은 선 경계 노이즈까지 커버
+    인페인팅 : cv2.INPAINT_TELEA, 반경 5px
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # ── 녹색 레이저 마스크 ──────────────────────────────────────────
+    green_lo = np.array([35,  80, 100], dtype=np.uint8)
+    green_hi = np.array([85, 255, 255], dtype=np.uint8)
+    mask = cv2.inRange(hsv, green_lo, green_hi)
+
+    # ── 적색 레이저 마스크 (필요 시 아래 주석 해제) ─────────────────
+    # red_lo1 = np.array([  0, 100, 100], dtype=np.uint8)
+    # red_hi1 = np.array([ 10, 255, 255], dtype=np.uint8)
+    # red_lo2 = np.array([165, 100, 100], dtype=np.uint8)
+    # red_hi2 = np.array([179, 255, 255], dtype=np.uint8)
+    # red_mask = cv2.bitwise_or(
+    #     cv2.inRange(hsv, red_lo1, red_hi1),
+    #     cv2.inRange(hsv, red_lo2, red_hi2),
+    # )
+    # mask = cv2.bitwise_or(mask, red_mask)
+
+    if cv2.countNonZero(mask) == 0:
+        # 레이저 픽셀이 없으면 복사본만 반환 (원본 보호)
+        return img.copy()
+
+    # 팽창으로 선 경계 노이즈까지 덮기
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    mask = cv2.dilate(mask, kernel, iterations=2)
+
+    # TELEA 인페인팅: 마스킹된 픽셀을 주변 흑/백 마커 패턴으로 자연스럽게 복원
+    return cv2.inpaint(img, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+
+
 def _detect_largest_marker(gray: np.ndarray) -> Optional[np.ndarray]:
     """여러 ArUco 사전을 순회하며 가장 큰(면적 최대) 마커 4 모서리 반환."""
     best: Optional[np.ndarray] = None
@@ -72,6 +119,21 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         corners = _detect_largest_marker(gray)
+
+        # 1차 탐지 실패 → 녹색 레이저 인페인팅 후 재시도
+        # ⚠️ 인페인팅은 탐지 전용 임시 복사본에만 적용.
+        #    호모그래피(와핑)는 아래에서 원본 img에 적용되므로
+        #    레이저 프로파일 데이터가 출력 이미지에 그대로 보존된다.
+        if corners is None:
+            try:
+                img_no_laser = _remove_laser_lines(img)
+                gray_no_laser = cv2.cvtColor(img_no_laser, cv2.COLOR_BGR2GRAY)
+                corners = _detect_largest_marker(gray_no_laser)
+                if corners is not None:
+                    print("[ArUco] 레이저 인페인팅 후 마커 재탐지 성공 — 원본 이미지로 와핑 진행")
+            except Exception as e:
+                print(f"[ArUco] 인페인팅 재시도 오류 (무시): {e}")
+
         if corners is None:
             return image_bytes, info
 
