@@ -120,10 +120,11 @@ export default function RegisterPhotoScreen() {
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
+  const [laserAngle, setLaserAngle] = useState(90);
+  const [shootingAngle, setShootingAngle] = useState(45);
   const [beadType, setBeadType] = useState<"위빙 비드" | "스트레이트 비드">("위빙 비드");
   const [passType, setPassType] = useState<"싱글 패스" | "멀티 패스">("싱글 패스");
   const [plateThickness, setPlateThickness] = useState("");
-  const [isMockLaser, setIsMockLaser] = useState(false);
 
   const selfScoreNum = parseInt(selfScore) || 0;
 
@@ -252,11 +253,12 @@ export default function RegisterPhotoScreen() {
           aiModel: "gpt-4o",
           isFillet,
           hasLaser,
+          laserAngle: hasLaser ? laserAngle : undefined,
+          shootingAngle: hasLaser ? shootingAngle : undefined,
           analysisMode: "quick",
           beadType,
           passType,
           plateThickness: plateThickness.trim() || undefined,
-          isMockLaser: isMockLaser || undefined,
         }),
       });
 
@@ -457,7 +459,40 @@ export default function RegisterPhotoScreen() {
             ))}
           </View>
           {hasLaser && (
-            <Text style={styles.laserAngleHint}>각도는 카메라 촬영 화면에서 선택하세요</Text>
+            <>
+              <View style={{ gap: 6 }}>
+                <Text style={styles.laserSubLabel}>격자 레이저 조사 각도</Text>
+                <View style={styles.modeSelector}>
+                  {[30, 45, 60, 90].map((deg) => (
+                    <Pressable
+                      key={deg}
+                      style={[styles.modeOption, laserAngle === deg && styles.modeOptionActive]}
+                      onPress={() => { setLaserAngle(deg); Haptics.selectionAsync(); }}
+                    >
+                      <Text style={[styles.modeOptionText, laserAngle === deg && styles.modeOptionTextActive]}>
+                        {deg}°
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <View style={{ gap: 6 }}>
+                <Text style={styles.laserSubLabel}>사진 촬영 각도</Text>
+                <View style={styles.modeSelector}>
+                  {[30, 45, 60, 90].map((deg) => (
+                    <Pressable
+                      key={deg}
+                      style={[styles.modeOption, shootingAngle === deg && styles.modeOptionActive]}
+                      onPress={() => { setShootingAngle(deg); Haptics.selectionAsync(); }}
+                    >
+                      <Text style={[styles.modeOptionText, shootingAngle === deg && styles.modeOptionTextActive]}>
+                        {deg}°
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            </>
           )}
         </View>
 
@@ -718,41 +753,6 @@ export default function RegisterPhotoScreen() {
           </Text>
         </View>
 
-        {/* 개발자 전용 Mock 테스트 — DEV 빌드에서만 표시 */}
-        {__DEV__ && (
-          <View style={styles.devSection}>
-            <View style={styles.devSectionHeader}>
-              <Ionicons name="construct-outline" size={13} color={Colors.warning} />
-              <Text style={styles.devSectionTitle}>개발자 전용 테스트</Text>
-            </View>
-            <Pressable
-              style={styles.devCheckRow}
-              onPress={() => { setIsMockLaser(v => !v); Haptics.selectionAsync(); }}
-            >
-              <Ionicons
-                name={isMockLaser ? "checkbox" : "square-outline"}
-                size={20}
-                color={isMockLaser ? Colors.warning : Colors.textMuted}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.devCheckLabel, isMockLaser && { color: Colors.warning }]}>
-                  🛠 격자 레이저 가상 데이터(Mock)로 테스트
-                </Text>
-                <Text style={styles.devCheckSub}>
-                  실제 레이저 장비 없이 3D 교차검증 · 필릿 분석 UI를 시뮬레이션합니다
-                </Text>
-              </View>
-            </Pressable>
-            {isMockLaser && (
-              <View style={styles.devActiveRow}>
-                <Ionicons name="warning-outline" size={12} color={Colors.warning} />
-                <Text style={styles.devActiveText}>
-                  Mock 활성화 — 진단 결과에 가상 3D 데이터가 주입됩니다
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
       </KeyboardAwareScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
@@ -1245,59 +1245,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  // 개발자 Mock 섹션
-  devSection: {
-    borderWidth: 1,
-    borderColor: Colors.warning + "55",
-    borderRadius: 12,
-    backgroundColor: Colors.warning + "0A",
-    padding: 12,
-    gap: 10,
-  },
-  devSectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  devSectionTitle: {
-    color: Colors.warning,
-    fontFamily: "Inter_700Bold",
-    fontSize: 12,
-    letterSpacing: 0.5,
-  },
-  devCheckRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  devCheckLabel: {
-    color: Colors.textSecondary,
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  devCheckSub: {
-    color: Colors.textMuted,
-    fontFamily: "Inter_400Regular",
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  devActiveRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: Colors.warning + "18",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  devActiveText: {
-    color: Colors.warning,
-    fontFamily: "Inter_500Medium",
-    fontSize: 11,
-    flex: 1,
-  },
   // 레이저
   laserToggleRow: { flexDirection: "row", gap: 10 },
   laserOption: {
@@ -1312,11 +1259,10 @@ const styles = StyleSheet.create({
   },
   laserOptionText: { color: Colors.textMuted, fontFamily: "Inter_500Medium", fontSize: 13 },
   laserOptionTextActive: { color: Colors.primary },
-  laserAngleHint: {
+  laserSubLabel: {
     color: Colors.textMuted,
     fontFamily: "Inter_400Regular",
     fontSize: 12,
-    fontStyle: "italic",
     paddingLeft: 2,
   },
 });

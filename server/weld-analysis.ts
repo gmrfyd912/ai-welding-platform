@@ -10,82 +10,6 @@ const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
 console.log(`[WeldAnalysis] FastAPI endpoint = ${FASTAPI_BASE}`);
 
-// ══════════════════════════════════════════════════════════════════
-// 🛠 개발자용 Mock 데이터 — 실제 레이저 장비 없이 3D 로직 테스트
-// isMockLaser=true 요청 시 FastAPI 결과에 이 데이터를 강제 덮어씌움
-// ══════════════════════════════════════════════════════════════════
-const MOCK_LASER_ANALYSIS = {
-  status:             "success",
-  beadHeightMax:      2.48,
-  beadHeightMin:      0.92,
-  beadHeightAvg:      1.71,
-  heightVariance:     1.56,
-  convexity:          "convex",
-  convexityMm:        1.71,
-  laserGridSpacingMm: 3.12,
-  profile: [
-    { x_pct: 10, height_mm: 1.20 },
-    { x_pct: 20, height_mm: 1.55 },
-    { x_pct: 30, height_mm: 1.98 },
-    { x_pct: 40, height_mm: 2.48 },
-    { x_pct: 50, height_mm: 2.31 },
-    { x_pct: 60, height_mm: 8.90 },   // ← 스패터로 격자 가림 → 이상치
-    { x_pct: 70, height_mm: 1.85 },
-    { x_pct: 80, height_mm: 1.44 },
-    { x_pct: 90, height_mm: 0.92 },
-  ],
-  worstPoint: { x_pct: 40, y_pct: 50, height_mm: 2.48 },
-  gridLines:  [],
-  message:    "격자 간격 3.12mm | 수평선 22개 검출 [MOCK 데이터]",
-  // 교차 검증 필드 (fuse_and_validate 결과)
-  is_cross_validated: true,
-  confidence_score:   85.5,
-  corrected_profile: [
-    { x_pct: 10, height_mm: 1.20, source: "laser" },
-    { x_pct: 20, height_mm: 1.55, source: "laser" },
-    { x_pct: 30, height_mm: 1.98, source: "laser" },
-    { x_pct: 40, height_mm: 2.48, source: "laser" },
-    { x_pct: 50, height_mm: 2.31, source: "laser" },
-    { x_pct: 60, height_mm: 1.90, source: "estimated" }, // 보정됨
-    { x_pct: 70, height_mm: 1.85, source: "laser" },
-    { x_pct: 80, height_mm: 1.44, source: "laser" },
-    { x_pct: 90, height_mm: 0.92, source: "laser" },
-  ],
-  segment_errors: [
-    { x_pct: 10, error_pct:   5.2, is_outlier: false },
-    { x_pct: 20, error_pct:   8.1, is_outlier: false },
-    { x_pct: 30, error_pct:  11.3, is_outlier: false },
-    { x_pct: 40, error_pct:   9.7, is_outlier: false },
-    { x_pct: 50, error_pct:   7.4, is_outlier: false },
-    { x_pct: 60, error_pct: 368.4, is_outlier: true  }, // ← 이상치 탐지
-    { x_pct: 70, error_pct:   6.8, is_outlier: false },
-    { x_pct: 80, error_pct:   4.1, is_outlier: false },
-    { x_pct: 90, error_pct:  12.9, is_outlier: false },
-  ],
-} as const;
-
-// MOCK_FILLET_ANALYSIS 수식 정합성 규칙:
-//   actualThroat = theoreticalThroat + convexity.value_mm
-//   4.56         = 4.81             + (-0.25)  ← 수식 일치 ✓
-//   actualThroat < theoreticalThroat → convexity.type = "concave" ✓
-const MOCK_FILLET_ANALYSIS = {
-  beadWidth:          9.2,
-  equalLeg:           6.51,              // 9.2 × 0.7071
-  theoreticalThroat:  4.60,              // 6.51 × 0.7071
-  actualThroat:       4.35,              // 4.60 + (-0.25) = 4.35
-  unequalLeg: {
-    z1:        7.1,
-    z2:        6.5,
-    isUnequal: true,
-    difference: 0.6,
-  },
-  convexity: {
-    type:     "concave",                 // actual(4.35) < theoretical(4.60) → concave ✓
-    value_mm: -0.25,                     // 4.60 + (-0.25) = 4.35 ✓
-  },
-  note: "[MOCK 가상 데이터 — 실제 필릿 측정값이 아님]",
-} as const;
-
 // ── AbortSignal 기반 타임아웃 fetch ─────────────────────────────
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
@@ -117,9 +41,10 @@ async function callFastApiAnalyze(params: {
   analysisMode:   string;
   measurementContext?: string;  // 재분석 시 LLM system 프롬프트에 주입할 Ground-Truth
   // 추가 파라미터 (FastAPI Form 기본값 있음)
-  isFillet?:      boolean;
-  hasLaser?:      boolean;
-  laserAngleDeg?: string;
+  isFillet?:         boolean;
+  hasLaser?:         boolean;
+  laserAngleDeg?:    string;
+  shootingAngleDeg?: string;
 }): Promise<any> {
   const formData = new FormData();
 
@@ -152,9 +77,10 @@ async function callFastApiAnalyze(params: {
     formData.append("measurement_context", params.measurementContext);
   }
   // 필릿·레이저 파라미터 — FastAPI Form 기본값(false/45)이 있으나 명시 전달
-  formData.append("is_fillet",      params.isFillet  ? "true" : "false");
-  formData.append("has_laser",      params.hasLaser  ? "true" : "false");
-  formData.append("laser_angle_deg", params.laserAngleDeg ?? "45");
+  formData.append("is_fillet",          params.isFillet  ? "true" : "false");
+  formData.append("has_laser",          params.hasLaser  ? "true" : "false");
+  formData.append("laser_angle_deg",    params.laserAngleDeg    ?? "90");
+  formData.append("shooting_angle_deg", params.shootingAngleDeg ?? "90");
 
   const resp = await fetchWithTimeout(
     `${FASTAPI_BASE}/analyze-welding`,
@@ -184,7 +110,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
       beadType, passType, aiModel,
       previousResultsSummary, plateThickness, pipeOuterDiameterMm,
       language,
-      isMockLaser, isFillet, hasLaser, laserAngleDeg,
+      isFillet, hasLaser, laserAngle, shootingAngle,
     } = req.body;
 
     const frontPhoto = photos?.front || imageBase64;
@@ -226,9 +152,10 @@ export function registerWeldAnalysisRoute(app: Express): void {
         pipeOuterDiameterMm: pipeOuterDiameterMm ? String(pipeOuterDiameterMm) : "",
         language:       language || "ko",
         analysisMode:   "quick",        // 최초 분석은 항상 quick 모드 (LLM 없음)
-        isFillet:       isFillet === true || isFillet === "true",
-        hasLaser:       hasLaser === true || hasLaser === "true",
-        laserAngleDeg:  laserAngleDeg ? String(laserAngleDeg) : "45",
+        isFillet:          isFillet === true || isFillet === "true",
+        hasLaser:          hasLaser === true || hasLaser === "true",
+        laserAngleDeg:     laserAngle    ? String(laserAngle)    : "90",
+        shootingAngleDeg:  shootingAngle ? String(shootingAngle) : "90",
       };
 
       // 콜드 스타트 사전 워밍업: FastAPI에 가벼운 ping (실패해도 무시)
@@ -264,23 +191,10 @@ export function registerWeldAnalysisRoute(app: Express): void {
 
       console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
 
-      // ── Mock 데이터 주입 (개발자용) ─────────────────────────────
-      let laserAnalysis = result.visionMeasurement?.laser_analysis ?? null;
-      let filletAnalysis = result.filletAnalysis ?? null;
-
-      if (isMockLaser === true || isMockLaser === "true") {
-        console.warn("[analyze-weld] 🛠 Mock 레이저 데이터 주입 (isMockLaser=true)");
-        laserAnalysis = { ...MOCK_LASER_ANALYSIS };
-        if (isFillet === true || isFillet === "true") {
-          console.warn("[analyze-weld] 🛠 Mock 필릿 데이터 주입 (isFillet=true)");
-          filletAnalysis = { ...MOCK_FILLET_ANALYSIS };
-        }
-      }
-
       res.json({
         ...result,
-        laserAnalysis,
-        filletAnalysis,
+        laserAnalysis:  result.visionMeasurement?.laser_analysis ?? null,
+        filletAnalysis: result.filletAnalysis ?? null,
       });
 
     } catch (err: any) {

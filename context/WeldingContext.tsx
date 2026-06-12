@@ -166,6 +166,9 @@ export interface WeldingResult {
     confidence_score?: number;
     corrected_profile?: Array<{ x_pct: number; height_mm: number; source: "laser" | "estimated" }>;
     segment_errors?: Array<{ x_pct: number; error_pct: number; is_outlier: boolean }>;
+    // 비드 편차 지표 (비전 너비 프로파일 IQR 및 레이저 직진도)
+    beadWidthDeviation?: number;
+    straightnessDeviation?: number;
   } | null;
 }
 

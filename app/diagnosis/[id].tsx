@@ -1191,7 +1191,7 @@ export default function DiagnosisScreen() {
                       label="비드 직진도"
                       value={beadSrc.straightness.value}
                       score={sc}
-                      sub={la ? "레이저: -" : undefined}
+                      sub={la ? (la.straightnessDeviation != null ? `레이저: ±${la.straightnessDeviation.toFixed(2)}mm` : "레이저: -") : undefined}
                       status={stSt(sc)}
                     />
                   );
@@ -1208,7 +1208,7 @@ export default function DiagnosisScreen() {
                         label="비드 폭 균일성"
                         value={beadSrc.width.value}
                         score={sc}
-                        sub={la ? "레이저: -" : undefined}
+                        sub={la ? (la.beadWidthDeviation != null ? `레이저 IQR: ${la.beadWidthDeviation.toFixed(2)}mm` : "레이저: -") : undefined}
                         status={stSt(sc)}
                       />
                     );

@@ -215,6 +215,7 @@ def fuse_and_validate(
 
 def analyze_laser_grid(image_bytes: bytes, ppm: float,
                        laser_angle_deg: float = 45.0,
+                       shooting_angle_deg: float = 90.0,
                        bead_polygon_pct: list = None) -> dict:
     """
     DOE 격자 레이저 분석으로 비드 높이/오목볼록도 측정.
@@ -306,6 +307,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         n_segments = 10
         x_range = max(bead_x_max - bead_x_min, 1)
         tan_angle = max(math.tan(math.radians(laser_angle_deg)), 1e-9)
+        sin_shooting = max(math.sin(math.radians(shooting_angle_deg)), 1e-9)
 
         # 비드 중앙 y에 대한 예상 격자선 y (평탄면 기준 보간)
         above_ys = [cy for cy in flat_ys if cy < bead_y_min]
@@ -349,8 +351,9 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
 
             actual_y = float(np.median(seg_ys))
             # [6단계] 양수 = 위로 휨 = 볼록 (비드 솟아오름)
+            # sin_shooting 보정: 비스듬히 촬영 시 격자 변형량이 압축되므로 복원
             deformation_px = expected_center_y - actual_y
-            height_mm = round(deformation_px / ppm / tan_angle, 2)
+            height_mm = round(deformation_px / sin_shooting / ppm / tan_angle, 2)
             heights_mm.append(height_mm)
             profile.append({"x_pct": x_pct, "height_mm": height_mm})
 
@@ -421,6 +424,7 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
                             pipe_outer_diameter_mm: float = 0.0,
                             has_laser: bool = False,
                             laser_angle_deg: float = 45.0,
+                            shooting_angle_deg: float = 90.0,
                             image_bytes: bytes = None):
     """
     비드 폭 / 직진도 분석.
@@ -823,6 +827,7 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
             image_bytes=image_bytes,
             ppm=ppm,
             laser_angle_deg=laser_angle_deg,
+            shooting_angle_deg=shooting_angle_deg,
             bead_polygon_pct=bead_polygon_pct,
         )
         # 교차 검증 융합: 레이저 이상 구간을 강건 회귀 추정값으로 보정
@@ -834,6 +839,23 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
                 "confidence_score":   fusion["confidence_score"],
                 "segment_errors":     fusion["segment_errors"],
             })
+            # 비드 폭 편차: 비전 측정 너비 프로파일의 IQR (P75-P25)
+            if width_profile_samples:
+                wms = np.array([s["width_mm"] for s in width_profile_samples], dtype=np.float64)
+                if len(wms) >= 4:
+                    bwd = round(float(np.percentile(wms, 75) - np.percentile(wms, 25)), 2)
+                else:
+                    bwd = round(float(wms.max() - wms.min()), 2)
+                laser_result["beadWidthDeviation"] = bwd
+            # 직진도 이탈: 레이저 높이 프로파일의 선형 추세 대비 최대 잔차
+            profile_pts = laser_result.get("profile", [])
+            if len(profile_pts) >= 3:
+                hs = np.array([p["height_mm"] for p in profile_pts], dtype=np.float64)
+                xs = np.array([p["x_pct"]     for p in profile_pts], dtype=np.float64)
+                coeffs = np.polyfit(xs, hs, 1)
+                fitted = np.polyval(coeffs, xs)
+                sd = round(float(np.max(np.abs(hs - fitted))), 2)
+                laser_result["straightnessDeviation"] = sd
         else:
             laser_result.update({
                 "is_cross_validated": False,
