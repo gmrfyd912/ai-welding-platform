@@ -22,44 +22,94 @@ _DICT_IDS = [
 ]
 
 
+def remove_laser_via_fft(
+    img_bgr: np.ndarray,
+    center_radius: int = 40,
+    notch_radius: int = 8,
+    peak_sigma: float = 3.0,
+) -> np.ndarray:
+    """2D FFT Notch Filter로 주기성 격자 레이저 노이즈를 제거한 uint8 Grayscale 반환.
+
+    ⚠️  전처리·탐지 전용 함수. 레이저 프로파일/비드 분석에는 원본 BGR을 사용할 것.
+
+    설계 근거 (수학적/논리적):
+      격자 레이저는 공간상에서 주기적(Periodic) 패턴 → 2D FFT 스펙트럼에서
+      DC 중앙에서 떨어진 고주파 위치에 임펄스(날카로운 피크)로 집중됨.
+      마커/비드의 형태 정보는 저주파(중앙 근처)에 집중됨.
+      따라서 두 영역을 분리하여 레이저 피크만 선택적으로 소거할 수 있음:
+
+        ① 중앙 center_radius(기본 40px) 이내 → 저주파 보존 (mask = 1).
+        ② 중앙 외부에서 통계적 임계값 T = μ + peak_sigma·σ 를 초과하는 피크
+           탐지 (외부 픽셀만의 평균·표준편차 기반 → 배경 노이즈와 레이저
+           피크를 자동 구분; 조명·해상도 변화에 강건함).
+        ③ 각 피크를 notch_radius(기본 8px) 반경 타원 커널로 팽창 →
+           Notch 영역 정의 → mask = 0 (차단).
+        ④ 저주파 영역은 최종 강제 복원 (mask[center_region] = 1).
+        ⑤ IFFT → 복소수 절대값 → 0–255 정규화 → uint8.
+
+    Args:
+        center_radius: 저주파 보존 반경 (px). 기본 40.
+        notch_radius:  각 피크 Notch 반경 (px). 기본 8.
+        peak_sigma:    피크 탐지 임계값 계수 (μ + σ 배). 기본 3.0.
+    """
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    H, W = gray.shape
+    cy, cx = H // 2, W // 2
+
+    # 주파수 도메인 변환 (DC를 중앙으로 이동)
+    fshift = np.fft.fftshift(np.fft.fft2(gray))
+    magnitude = np.abs(fshift)
+
+    # 중앙 저주파 영역 정의
+    Y, X = np.ogrid[:H, :W]
+    dist = np.sqrt((Y - cy) ** 2 + (X - cx) ** 2)
+    center_region = dist <= center_radius
+
+    # 외부 고주파 영역에서 레이저 피크 동적 탐지
+    outer_mag = magnitude.copy()
+    outer_mag[center_region] = 0.0
+    outer_vals = outer_mag[~center_region]
+    threshold = float(outer_vals.mean() + peak_sigma * outer_vals.std())
+
+    peak_binary = (outer_mag > threshold).astype(np.uint8)
+    ellipse_k = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (notch_radius * 2 + 1, notch_radius * 2 + 1)
+    )
+    notch_region = cv2.dilate(peak_binary, ellipse_k)
+
+    # Notch Filter 마스크 구성 및 적용
+    mask = np.ones((H, W), dtype=np.float32)
+    mask[notch_region > 0] = 0.0
+    mask[center_region] = 1.0  # 저주파 항상 보존
+
+    # 역 FFT → 공간 도메인 복원
+    f_filtered = np.fft.ifft2(np.fft.ifftshift(fshift * mask))
+    cleaned = np.abs(f_filtered)  # 켤레 비대칭으로 생긴 잔류 허수부 제거
+
+    # 0–255 정규화
+    c_min, c_max = float(cleaned.min()), float(cleaned.max())
+    if c_max > c_min:
+        cleaned = (cleaned - c_min) / (c_max - c_min) * 255.0
+    else:
+        cleaned = np.zeros_like(cleaned)
+    return cleaned.astype(np.uint8)
+
+
 def _preprocess_for_aruco(img: np.ndarray) -> np.ndarray:
-    """빛 포화 레이저 픽셀 강제 흑색화(Blackout Hack)로 마커 외곽선 복원.
+    """FFT Notch Filter + 적응형 이진화로 ArUco 탐지용 이미지 반환.
 
     ⚠️  이 함수의 출력은 마커 코너 탐지에만 사용된다.
         호모그래피(와핑)와 레이저 프로파일 분석은 반드시
         원본 BGR 이미지(Original Image)로 진행해야 한다.
-
-    파이프라인:
-      1. BGR → Grayscale 변환.
-      2. threshold(220, THRESH_BINARY) → laser_mask:
-         밝기 220 이상의 과노출 픽셀(레이저 중심부 포화 영역)을 255로 마킹.
-         녹색 레이저 중심은 RGB ≈ (255,255,255)에 가까워 Grayscale ≈ 250+.
-      3. adaptiveThreshold (THRESH_BINARY, Gaussian, blockSize=15, C=4)
-         → binary_img: 마커 탐지용 기본 이진화.
-      4. Blackout Hack:
-         binary_img[laser_mask > 0] = 0
-         포화 레이저 픽셀 → 완전 검정 강제 덮어씌우기.
-         끊어진 마커 외곽선이 검정으로 복원되고,
-         마커 내부 얇은 선은 ArUco 다수결 판독 로직이 무시함.
     """
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 과노출 레이저 픽셀 마스크 (밝기 220 이상)
-    _, laser_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
-
-    # 마커 탐지용 적응형 이진화
-    binary_img = cv2.adaptiveThreshold(
-        gray, 255,
+    cleaned = remove_laser_via_fft(img)
+    return cv2.adaptiveThreshold(
+        cleaned, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
         blockSize=15,
         C=4,
     )
-
-    # Blackout Hack: 포화 레이저 픽셀 → 0 (검정) 강제 덮어씌우기
-    binary_img[laser_mask > 0] = 0
-
-    return binary_img
 
 
 def _detect_largest_marker(gray: np.ndarray) -> Optional[np.ndarray]:
@@ -113,7 +163,7 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         corners = _detect_largest_marker(gray)
 
-        # 1차 탐지 실패 → R채널 분리 이진화 전처리 후 재시도
+        # 1차 탐지 실패 → FFT Notch Filter 전처리 후 재시도
         # ⚠️ 전처리 이미지(binary)는 탐지 전용 임시 사본.
         #    호모그래피(와핑)는 원본 img 에만 적용되므로
         #    레이저 프로파일 데이터가 출력 이미지에 그대로 보존된다.
@@ -122,7 +172,7 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
                 binary = _preprocess_for_aruco(img)
                 corners = _detect_largest_marker(binary)
                 if corners is not None:
-                    print("[ArUco] R채널 분리 전처리 후 마커 재탐지 성공 — 원본 이미지로 와핑 진행")
+                    print("[ArUco] FFT Notch Filter 전처리 후 마커 재탐지 성공 — 원본 이미지로 와핑 진행")
             except Exception as e:
                 print(f"[ArUco] 전처리 재시도 오류 (무시): {e}")
 
