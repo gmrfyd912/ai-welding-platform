@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Optional, Tuple
 import cv2
 import numpy as np
-from skimage.filters import frangi as _skimage_frangi
 
 
 _DICT_IDS = [
@@ -23,78 +22,18 @@ _DICT_IDS = [
 ]
 
 
-def remove_laser_via_frangi(
-    img_bgr: np.ndarray,
-    sigmas: tuple = (1, 2, 3),
-    dilate_ksize: int = 5,
-    inpaint_radius: int = 3,
-) -> np.ndarray:
-    """Frangi Vesselness Filter로 레이저 선을 탐지·인페인팅 제거한 BGR 이미지 반환.
-
-    ⚠️  전처리·탐지 전용 함수. 레이저 프로파일/비드 분석에는 원본 BGR을 사용할 것.
-
-    설계 근거:
-      Frangi 필터(의료 혈관 탐지 알고리즘)는 Hessian 행렬의 고유값 비율로
-      선(Ridge) 구조를 탐지함. 원근 왜곡으로 격자 주기성이 깨지더라도
-      레이저 선은 국소적으로 Ridge 구조를 유지하므로 탐지 가능.
-      black_ridges=False → 어두운 배경 위 밝은 선(레이저) 탐지.
-
-    파이프라인:
-      1. BGR → Grayscale.
-      2. frangi(sigmas=(1,2,3), black_ridges=False):
-         얇은 선 폭에 맞춘 멀티스케일 Ridge 탐지 → Vesselness float64 [0,1].
-      3. Vesselness → 0–255 정규화 → Otsu 임계값 → 이진 laser_mask.
-         Otsu: 이미지별 최적 분리점 자동 산출 → 고정 임계값보다 강건.
-      4. laser_mask에 5×5 타원 커널 팽창(1회):
-         빛 번짐(Halo) 및 Ridge 경계 잔류 픽셀까지 커버.
-      5. cv2.inpaint(INPAINT_TELEA, radius=3):
-         마스크 내 픽셀을 주변 배경 텍스처로 자연스럽게 복원.
-      6. 레이저 선이 탐지되지 않으면(vesselness 모두 0) 원본 반환.
-
-    Args:
-        sigmas:         Frangi 스케일 범위. 기본 (1, 2, 3) — 얇은 레이저 선.
-        dilate_ksize:   마스크 팽창 커널 크기 (px). 기본 5.
-        inpaint_radius: TELEA 인페인팅 반경 (px). 기본 3.
-    """
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    # 1+2. Frangi Vesselness: 밝은 선 구조 추출 (float64, 0~1)
-    vesselness = _skimage_frangi(
-        gray.astype(np.float64),
-        sigmas=sigmas,
-        black_ridges=False,
-    )
-
-    # 3. 0–255 정규화 → Otsu 임계값으로 이진 laser_mask 생성
-    v_min, v_max = float(vesselness.min()), float(vesselness.max())
-    if v_max <= v_min:
-        return img_bgr.copy()  # 레이저 선 없음 → 원본 반환
-
-    vesselness_u8 = ((vesselness - v_min) / (v_max - v_min) * 255).astype(np.uint8)
-    _, laser_mask = cv2.threshold(
-        vesselness_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
-
-    # 4. 빛 번짐(Halo) 영역 커버 — 타원 커널 팽창
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (dilate_ksize, dilate_ksize)
-    )
-    laser_mask = cv2.dilate(laser_mask, kernel, iterations=1)
-
-    # 5. TELEA 인페인팅으로 레이저 선 주변 배경 텍스처로 복원
-    return cv2.inpaint(img_bgr, laser_mask, inpaintRadius=inpaint_radius,
-                       flags=cv2.INPAINT_TELEA)
-
-
 def _preprocess_for_aruco(img: np.ndarray) -> np.ndarray:
-    """Frangi 레이저 제거 + 적응형 이진화로 ArUco 탐지용 이미지 반환.
+    """BGR → 흑백 적응형 이진화. 1차 탐지 실패 시 재시도용 탐지 전용 이미지 반환.
 
     ⚠️  이 함수의 출력은 마커 코너 탐지에만 사용된다.
         호모그래피(와핑)와 레이저 프로파일 분석은 반드시
         원본 BGR 이미지(Original Image)로 진행해야 한다.
+
+    고급 레이저 제거가 필요하면 advanced_filters.py 의
+    remove_laser_via_fft / remove_laser_via_frangi 를 호출한 뒤
+    결과 이미지에 이 이진화를 적용하라.
     """
-    cleaned_bgr = remove_laser_via_frangi(img)
-    gray = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return cv2.adaptiveThreshold(
         gray, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -155,7 +94,7 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         corners = _detect_largest_marker(gray)
 
-        # 1차 탐지 실패 → Frangi 레이저 제거 전처리 후 재시도
+        # 1차 탐지 실패 → 적응형 이진화 전처리 후 재시도
         # ⚠️ 전처리 이미지(binary)는 탐지 전용 임시 사본.
         #    호모그래피(와핑)는 원본 img 에만 적용되므로
         #    레이저 프로파일 데이터가 출력 이미지에 그대로 보존된다.
@@ -164,7 +103,7 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
                 binary = _preprocess_for_aruco(img)
                 corners = _detect_largest_marker(binary)
                 if corners is not None:
-                    print("[ArUco] Frangi 레이저 제거 전처리 후 마커 재탐지 성공 — 원본 이미지로 와핑 진행")
+                    print("[ArUco] 적응형 이진화 전처리 후 마커 재탐지 성공 — 원본 이미지로 와핑 진행")
             except Exception as e:
                 print(f"[ArUco] 전처리 재시도 오류 (무시): {e}")
 
