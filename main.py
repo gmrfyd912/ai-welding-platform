@@ -2,6 +2,7 @@ import os
 import math
 import base64
 import httpx
+import cv2
 import numpy as np
 from typing import Optional
 from fastapi import FastAPI, UploadFile, Form, File
@@ -498,10 +499,31 @@ async def _call_roboflow(image_bytes: bytes, label: str) -> dict:
     if not ROBOFLOW_API_KEY:
         return data
     try:
+        # ── R채널 분리 전처리 (Roboflow 전송 전용 임시 사본) ──────────────
+        # 녹색 격자 레이저(~532nm)는 G채널에 집중: G값≈255, R값≈0.
+        # R채널만 추출하면 레이저가 픽셀을 훼손하지 않고 자연 소거되고,
+        # 용접 비드의 명암·윤곽·형태 정보는 원본 그대로 보존됨.
+        # ⚠️ robo_bytes는 이 함수 내부 임시 사본. 원본 image_bytes(ArUco·
+        #    레이저 분석용)는 변경되지 않으며 호출부에서 그대로 사용됨.
+        robo_bytes = image_bytes
+        try:
+            _arr = np.frombuffer(image_bytes, dtype=np.uint8)
+            _img = cv2.imdecode(_arr, cv2.IMREAD_COLOR)
+            if _img is not None:
+                _, _, _r = cv2.split(_img)
+                _ok, _buf = cv2.imencode(
+                    ".jpg", cv2.merge([_r, _r, _r]),
+                    [cv2.IMWRITE_JPEG_QUALITY, 92],
+                )
+                if _ok:
+                    robo_bytes = bytes(_buf.tobytes())
+        except Exception as _e:
+            print(f"[Roboflow:{label}] R채널 전처리 실패 (원본 전송): {_e}")
+        # ─────────────────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=30) as http_client:
             robo_resp = await http_client.post(
                 f"https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key={ROBOFLOW_API_KEY}&confidence={ROBOFLOW_CONF}&overlap={ROBOFLOW_OVERLAP}",
-                files={"file": ("image.jpg", image_bytes, "image/jpeg")},
+                files={"file": ("image.jpg", robo_bytes, "image/jpeg")},
             )
         if robo_resp.status_code == 200:
             data = robo_resp.json()
