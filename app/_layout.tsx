@@ -17,6 +17,7 @@ import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { WeldingProvider } from "@/context/WeldingContext";
 import { LanguageProvider } from "@/context/LanguageContext";
+import { RoleProvider, useRole } from "@/context/RoleContext";
 import Colors from "@/constants/colors";
 import { seedDemoData } from "@/context/SeedData";
 
@@ -25,16 +26,20 @@ seedDemoData();
 
 function RootLayoutNav() {
   const { user, isLoading } = useAuth();
+  const { userRole, clearRole } = useRole();
 
   useEffect(() => {
-    if (!isLoading) {
-      if (user) {
-        router.replace("/home");
-      } else {
-        router.replace("/login");
-      }
+    if (isLoading) return;
+    if (!user) {
+      // 로그아웃 시 역할 초기화 — 다음 로그인에서 역할 선택 화면 재노출
+      clearRole();
+      router.replace("/login");
+    } else if (!userRole) {
+      // 로그인됐지만 역할 미선택 → 역할 선택 화면
+      router.replace("/role-selection");
     }
-  }, [user, isLoading]);
+    // 역할 선택 후 라우팅은 role-selection.tsx에서 직접 처리
+  }, [user, isLoading, userRole]);
 
   if (isLoading) {
     return (
@@ -48,9 +53,14 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.bg }, orientation: "portrait" }}>
       <Stack.Screen name="login" />
       <Stack.Screen name="register" />
+      <Stack.Screen name="role-selection" />
+      {/* 교육원 탭 네비게이터 */}
+      <Stack.Screen name="(tabs)" />
+      {/* 현장 탭 네비게이터 */}
+      <Stack.Screen name="(field-tabs)" />
+      {/* 교육원 공용 스크린 */}
       <Stack.Screen name="home" />
       <Stack.Screen name="theory" />
-      <Stack.Screen name="(tabs)" />
       <Stack.Screen name="coaching-test" />
       <Stack.Screen name="coaching-live" options={{ orientation: "all" }} />
       <Stack.Screen name="register-photo" options={{ presentation: "modal" }} />
@@ -82,9 +92,11 @@ export default function RootLayout() {
           <KeyboardProvider>
             <LanguageProvider>
               <AuthProvider>
-                <WeldingProvider>
-                  <RootLayoutNav />
-                </WeldingProvider>
+                <RoleProvider>
+                  <WeldingProvider>
+                    <RootLayoutNav />
+                  </WeldingProvider>
+                </RoleProvider>
               </AuthProvider>
             </LanguageProvider>
           </KeyboardProvider>
