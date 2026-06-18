@@ -5,7 +5,7 @@
   "scripts": {
     "postinstall": "patch-package",
     "expo:dev": "npx expo start",
-    "server:dev": "cross-env NODE_ENV=development tsx --env-file=.env server/index.ts",
+    "server:dev": "cross-env NODE_ENV=development tsx watch --env-file=.env server/index.ts",
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
     "expo:static:build": "node scripts/build.js",
     "server:build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=server_dist",

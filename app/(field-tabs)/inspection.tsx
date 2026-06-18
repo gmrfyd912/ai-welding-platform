@@ -190,12 +190,14 @@ export default function InspectionScreen() {
       // ③ XMLHttpRequest 사용 — global fetch(expo/fetch)와 달리
       //    RN 네이티브 파일 I/O를 경유하므로 content:// + file:// URI 모두 지원
       const uploadUrl = apiUrl("api/field/analysis");
+      console.log("[inspection] 분석 API 요청 URL:", uploadUrl);
       const data = await new Promise<any>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", uploadUrl);
         xhr.timeout = 90_000;
 
         xhr.onload = () => {
+          console.log("[inspection] XHR 응답:", xhr.status, xhr.responseText.slice(0, 200));
           let parsed: any = {};
           try { parsed = JSON.parse(xhr.responseText); } catch { /* 빈 응답 */ }
           if (xhr.status >= 200 && xhr.status < 300) {

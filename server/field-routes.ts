@@ -48,6 +48,7 @@ function randPick<T>(arr: T[]): T {
 
 // ─── 라우트 등록 ─────────────────────────────────────────────────────────────
 export function registerFieldRoutes(app: Express): void {
+  console.log("[field-routes] 라우트 등록 시작");
 
   // ── 사용자 ────────────────────────────────────────────────────────────────
 
@@ -374,6 +375,7 @@ export function registerFieldRoutes(app: Express): void {
     }
   });
 
+  console.log("[field-routes] POST /api/field/analysis 라우트 등록 중 (multer 포함)");
   // ── 통합 비전 분석 ──────────────────────────────────────────────────────────
   // POST /api/field/analysis  (multipart/form-data)
   // fields: image(file), project_name?, current_amp?, voltage_volt?, worker_name?
@@ -573,4 +575,6 @@ export function registerFieldRoutes(app: Express): void {
       }
     }
   );
+
+  console.log("[field-routes] 라우트 등록 완료: /api/field/* (analysis, seed, dashboard, users, records, inspections, defects)");
 }

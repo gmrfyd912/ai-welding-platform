@@ -216,7 +216,7 @@ const fastapi = startProcess(
 const nodeServer = startProcess(
   "Node",
   process.platform === "win32" ? "npx.cmd" : "npx",
-  ["cross-env", "NODE_ENV=development", "tsx", "--env-file=.env", "server/index.ts"],
+  ["cross-env", "NODE_ENV=development", "tsx", "watch", "--env-file=.env", "server/index.ts"],
   { PORT: NODE_PORT, FASTAPI_URL: `http://127.0.0.1:${FASTAPI_PORT}` }
 );
 
