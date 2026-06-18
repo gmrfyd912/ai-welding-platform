@@ -1,6 +1,20 @@
 import type { Express, Request, Response } from "express";
+import express from "express";
 import pool from "./db";
 import { ensureFieldTables } from "./schema";
+
+const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+const ANALYSIS_TIMEOUT_MS = 90_000;
+
+async function _fieldFetch(url: string, options: RequestInit, ms: number) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 // 서버 기동 시 테이블 자동 생성
 ensureFieldTables().catch(console.error);
@@ -357,4 +371,189 @@ export function registerFieldRoutes(app: Express): void {
       client.release();
     }
   });
+
+  // ── 통합 비전 분석 ──────────────────────────────────────────────────────────
+  // POST /api/field/analysis
+  // body: { imageBase64, project_name?, current_amp?, voltage_volt?, worker_name? }
+  // 내부 흐름:
+  //   1. 작업자 조회(없으면 생성) → record 생성
+  //   2. FastAPI /analyze-welding 호출 (quick 모드)
+  //   3. field_inspections + field_defects 저장
+  //   4. 결과 반환
+  app.post(
+    "/api/field/analysis",
+    express.json({ limit: "30mb" }),
+    async (req: Request, res: Response) => {
+      const {
+        imageBase64,
+        project_name,
+        current_amp,
+        voltage_volt,
+        worker_name,
+      } = req.body as {
+        imageBase64: string;
+        project_name?: string;
+        current_amp?: number;
+        voltage_volt?: number;
+        worker_name?: string;
+      };
+
+      if (!imageBase64) {
+        return res.status(400).json({ error: "imageBase64 필수" });
+      }
+
+      const client = await pool.connect();
+      try {
+        // ── 1. 작업자 조회 / 자동 생성 ────────────────────────────────────
+        const wName = worker_name?.trim() || "현장 작업자";
+        let userId: number;
+        const existing = await client.query(
+          `SELECT id FROM field_users WHERE name = $1 AND role = 'field_worker' LIMIT 1`,
+          [wName]
+        );
+        if (existing.rows.length > 0) {
+          userId = existing.rows[0].id;
+        } else {
+          const created = await client.query(
+            `INSERT INTO field_users (name, role) VALUES ($1, 'field_worker') RETURNING id`,
+            [wName]
+          );
+          userId = created.rows[0].id;
+        }
+
+        // ── 2. 작업 이력 생성 ──────────────────────────────────────────────
+        const recRes = await client.query(
+          `INSERT INTO field_weld_records (welder_id, project_name, current_amp, voltage_volt)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          [
+            userId,
+            project_name ?? "",
+            current_amp ?? null,
+            voltage_volt ?? null,
+          ]
+        );
+        const recordId: number = recRes.rows[0].id;
+
+        // ── 3. FastAPI /analyze-welding 호출 (quick 모드) ──────────────────
+        const imgBuf = Buffer.from(imageBase64, "base64");
+        const formData = new FormData();
+        formData.append(
+          "file",
+          new Blob([imgBuf], { type: "image/jpeg" }),
+          "weld.jpg"
+        );
+        formData.append("process",               "FCAW");
+        formData.append("posture",               "1G");
+        formData.append("material",              "탄소강 평판");
+        formData.append("bead_type",             "위빙 비드");
+        formData.append("pass_type",             "");
+        formData.append("ai_model",              "gpt");
+        formData.append("admin_feedback",        "");
+        formData.append("user_history",          "");
+        formData.append("plate_thickness",       "");
+        formData.append("pipe_outer_diameter_mm","");
+        formData.append("language",              "ko");
+        formData.append("analysis_mode",         "quick");
+        formData.append("is_fillet",             "false");
+        formData.append("has_laser",             "false");
+        formData.append("laser_angle_deg",       "90");
+        formData.append("shooting_angle_deg",    "90");
+
+        const faResp = await _fieldFetch(
+          `${FASTAPI_BASE}/analyze-welding`,
+          { method: "POST", body: formData },
+          ANALYSIS_TIMEOUT_MS
+        );
+
+        if (!faResp.ok) {
+          const errText = await faResp.text().catch(() => "");
+          let userMsg = "사진 분석에 실패했습니다. 용접부가 명확한 사진을 사용해 주세요.";
+          try { userMsg = JSON.parse(errText)?.message ?? userMsg; } catch {}
+          const err: any = new Error(userMsg);
+          err.status = faResp.status;
+          throw err;
+        }
+
+        const fa = await faResp.json();
+
+        // ── 4. 결과 파싱 ────────────────────────────────────────────────────
+        const finalStatus: "PASS" | "FAIL" =
+          fa.overallVerdict === "PASS" ? "PASS" : "FAIL";
+        const aiScore: number | null = fa.aiScore ?? null;
+
+        const vm = fa.visionMeasurement ?? {};
+        const avgBeadWidth: number | null =
+          vm.bead_width_max != null && vm.bead_width_min != null
+            ? parseFloat(
+                ((Number(vm.bead_width_max) + Number(vm.bead_width_min)) / 2).toFixed(2)
+              )
+            : null;
+        const straightnessError: number | null =
+          vm.straightness_variance != null
+            ? parseFloat(Number(vm.straightness_variance).toFixed(2))
+            : null;
+
+        const detectedDefects: Array<{
+          name: string; severity: string; confidence: number;
+        }> = ((fa.defects ?? []) as any[])
+          .filter((d) => d.detected === true)
+          .map((d) => ({
+            name:       d.name       ?? "알 수 없는 결함",
+            severity:   d.severity   ?? "보통",
+            confidence: d.confidence ?? 0,
+          }));
+
+        // ── 5. field_inspections 저장 ──────────────────────────────────────
+        const insRes = await client.query(
+          `INSERT INTO field_inspections
+             (record_id, ppm_scale, avg_bead_width, straightness_error, final_status)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [
+            recordId,
+            vm.ppm ?? null,
+            avgBeadWidth,
+            straightnessError,
+            finalStatus,
+          ]
+        );
+        const inspectionId: number = insRes.rows[0].id;
+
+        // ── 6. field_defects 저장 ──────────────────────────────────────────
+        for (const d of detectedDefects) {
+          await client.query(
+            `INSERT INTO field_defects (inspection_id, defect_type, confidence)
+             VALUES ($1, $2, $3)`,
+            [inspectionId, d.name, d.confidence]
+          );
+        }
+
+        res.json({
+          inspection_id:      inspectionId,
+          final_status:       finalStatus,
+          ai_score:           aiScore,
+          avg_bead_width:     avgBeadWidth,
+          straightness_error: straightnessError,
+          defect_count:       detectedDefects.length,
+          defects:            detectedDefects,
+        });
+      } catch (e: any) {
+        const isFetch =
+          e.message?.includes("fetch failed") ||
+          e.message?.includes("ECONNREFUSED");
+        const isTimeout = e.name === "AbortError";
+        const status = e.status ?? (isFetch || isTimeout ? 503 : 500);
+        console.error("[field/analysis] 오류:", e.message);
+        res.status(status).json({
+          error: "ANALYSIS_FAILED",
+          message: isFetch
+            ? "비전 분석 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."
+            : isTimeout
+            ? "분석 시간이 초과됐습니다 (90초). 다시 시도해 주세요."
+            : e.message ?? "분석 실패",
+        });
+      } finally {
+        client.release();
+      }
+    }
+  );
 }
