@@ -45,7 +45,7 @@ export default function RoleSelectionScreen() {
   const handleSelect = (role: AppRole) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setUserRole(role);
-    router.replace(role === "education" ? "/(tabs)" : "/(field-tabs)");
+    router.replace(role === "education" ? "/(tabs)" : "/(field-tabs)/inspection");
   };
 
   return (
