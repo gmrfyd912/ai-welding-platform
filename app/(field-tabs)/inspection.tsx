@@ -8,8 +8,6 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Alert,
   Modal,
   Pressable,
@@ -166,10 +164,22 @@ export default function InspectionScreen() {
     if (!imageUri) return;
     setAnalyzing(true);
     try {
-      // ① FormData 직접 구성 — base64 변환 없이 uri를 파일로 직배송
+      // ① URI 보정:
+      //    - Android 갤러리: content://media/... 형태 → XHR이 직접 읽음
+      //    - Android 카메라: file:///... 형태 → 그대로 사용
+      //    - iOS: file:///... 형태 → 그대로 사용
+      //    - 혹시 절대경로만 온 경우 file:// 접두사 추가
+      const normalizedUri =
+        imageUri.startsWith("file://") ||
+        imageUri.startsWith("content://") ||
+        imageUri.startsWith("ph://")
+          ? imageUri
+          : `file://${imageUri}`;
+
+      // ② FormData 구성
       const formData = new FormData();
       formData.append("image", {
-        uri:  imageUri,
+        uri:  normalizedUri,
         name: "weld.jpg",
         type: "image/jpeg",
       } as any);
@@ -177,24 +187,33 @@ export default function InspectionScreen() {
       if (current.trim())     formData.append("current_amp",  current.trim());
       if (voltage.trim())     formData.append("voltage_volt", voltage.trim());
 
-      // ② POST — Content-Type 헤더 미지정 (RN이 boundary 포함 multipart/form-data로 자동 설정)
-      const res = await fetch(apiUrl("api/field/analysis"), {
-        method: "POST",
-        body:   formData,
+      // ③ XMLHttpRequest 사용 — global fetch(expo/fetch)와 달리
+      //    RN 네이티브 파일 I/O를 경유하므로 content:// + file:// URI 모두 지원
+      const uploadUrl = apiUrl("api/field/analysis");
+      const data = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", uploadUrl);
+        xhr.timeout = 90_000;
+
+        xhr.onload = () => {
+          let parsed: any = {};
+          try { parsed = JSON.parse(xhr.responseText); } catch { /* 빈 응답 */ }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(parsed);
+          } else {
+            const msg =
+              parsed?.message ??
+              parsed?.error   ??
+              `서버 오류 ${xhr.status} (${xhr.statusText})`;
+            reject(new Error(msg));
+          }
+        };
+        xhr.onerror   = () => reject(new Error("네트워크 오류 — 서버에 연결할 수 없습니다"));
+        xhr.ontimeout = () => reject(new Error("요청 시간 초과 (90초) — 다시 시도해 주세요"));
+        xhr.send(formData);
       });
 
-      // ③ 에러 응답의 실제 메시지를 파싱하여 노출
-      let data: any;
-      try { data = await res.json(); } catch { data = {}; }
-      if (!res.ok) {
-        const msg =
-          data?.message ??
-          data?.error   ??
-          `서버 오류 ${res.status} — ${res.statusText}`;
-        throw new Error(msg);
-      }
-
-      // ④ 성공 — 폼 초기화 후 결과 모달 표시
+      // ④ 성공 — 폼·이미지 초기화 후 결과 모달 표시
       setProjectName("");
       setCurrent("");
       setVoltage("");
@@ -215,16 +234,12 @@ export default function InspectionScreen() {
 
   return (
     <>
-      <KeyboardAvoidingView
-        style={{ flex: 1, backgroundColor: Colors.bg }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={88}
-      >
+      <View style={{ flex: 1, backgroundColor: Colors.bg }}>
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[
             styles.container,
-            { paddingTop: insets.top + 16, paddingBottom: 120 },
+            { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 80 },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -371,7 +386,7 @@ export default function InspectionScreen() {
             </Text>
           )}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
 
       {/* 결과 모달 */}
       {result && (

@@ -387,7 +387,14 @@ export function registerFieldRoutes(app: Express): void {
     upload.single("image"),
     async (req: Request, res: Response) => {
       const file = req.file;
+
+      // ── 수신 진단 로그 (파일·필드 수신 여부 확인) ──────────────────────────
+      console.log(
+        `[field/analysis] 요청 수신 | file=${file ? `${file.originalname}(${file.size}B)` : "없음"} | body=${JSON.stringify(Object.keys(req.body))}`
+      );
+
       if (!file) {
+        console.warn("[field/analysis] multer: 파일 누락 — FormData 필드명 또는 Content-Type 확인 필요");
         return res.status(400).json({ error: "image 파일이 필요합니다" });
       }
 
@@ -543,7 +550,16 @@ export function registerFieldRoutes(app: Express): void {
           e.message?.includes("ECONNREFUSED");
         const isTimeout = e.name === "AbortError";
         const status = e.status ?? (isFetch || isTimeout ? 503 : 500);
-        console.error("[field/analysis] 오류:", e.message);
+
+        // 전체 진단 로그 출력
+        console.error("─── [field/analysis] 오류 발생 ───────────────");
+        console.error("  message :", e.message?.slice(0, 300));
+        console.error("  status  :", e.status ?? "N/A");
+        console.error("  isFetch :", isFetch);
+        console.error("  timeout :", isTimeout);
+        console.error("  stack   :", e.stack?.split("\n").slice(0, 4).join(" | "));
+        console.error("──────────────────────────────────────────────");
+
         res.status(status).json({
           error: "ANALYSIS_FAILED",
           message: isFetch
