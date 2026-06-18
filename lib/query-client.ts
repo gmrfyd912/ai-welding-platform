@@ -31,7 +31,13 @@ export function getApiUrl(): string {
         // hostUri 예: "192.168.0.11:8081" (Expo Metro 포트)
         // Express 서버는 5001번 포트에서 실행
         const ip = hostUri.split(":")[0];
-        if (ip && ip !== "localhost" && ip !== "127.0.0.1") {
+        // 사설 IP 대역(10.x / 172.16-31.x / 192.168.x)만 허용.
+        // ngrok 도메인, localhost, 127.0.0.1은 모두 제외한다.
+        // ngrok 터널 주소(xxxx.ngrok.io)가 ip !== "localhost" 체크를 통과해
+        // http://xxxx.ngrok.io:5001/ 이라는 잘못된 URL을 반환하는 버그를 방지한다.
+        const isPrivateIp =
+          /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
+        if (isPrivateIp) {
           const devUrl = `http://${ip}:5001/`;
           console.log(`[API] DEV 모드 — 로컬 서버 자동 감지: ${devUrl}`);
           return devUrl;
@@ -40,17 +46,19 @@ export function getApiUrl(): string {
     } catch {
       // expo-constants 미사용 환경에서는 폴백
     }
+    // DEV 모드이지만 사설 IP 감지 실패 → 경고 출력
+    const fallback = configured || PRODUCTION_URL;
+    console.warn(
+      "[API] ⚠ DEV 모드: 로컬 서버 IP 감지 실패 → " + fallback + " 사용 중\n" +
+      "      비전 분석 기능이 동작하지 않을 수 있습니다.\n" +
+      "      해결: EXPO_PUBLIC_DOMAIN=http://<컴퓨터_LAN_IP>:5001 환경변수로 Expo를 시작하세요.\n" +
+      "      예시: EXPO_PUBLIC_DOMAIN=http://192.168.1.100:5001 npx expo start"
+    );
+    return fallback.endsWith("/") ? fallback : `${fallback}/`;
   }
 
-  // 프로덕션 또는 감지 실패 → Render 서버
+  // 프로덕션 → Render 서버
   const fallback = configured || PRODUCTION_URL;
-  if (__DEV__) {
-    console.warn(
-      "[API] ⚠ DEV 모드이지만 로컬 IP 감지 실패 → 프로덕션 서버 사용: " + fallback + "\n" +
-      "      비전 분석이 동작하지 않을 수 있습니다.\n" +
-      "      해결: EXPO_PUBLIC_DOMAIN=http://<컴퓨터IP>:5001 환경 변수를 설정하여 Expo를 시작하세요."
-    );
-  }
   return fallback.endsWith("/") ? fallback : `${fallback}/`;
 }
 

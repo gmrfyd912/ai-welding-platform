@@ -8,7 +8,15 @@ const upload = multer({ storage: multer.memoryStorage() });
 const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
 const ANALYSIS_TIMEOUT_MS = 90_000;
 
-console.log(`[field-routes] FastAPI 주소: ${FASTAPI_BASE}`);
+// Render 프로덕션 환경(= FastAPI 없음) 여부 감지
+// FASTAPI_URL 미설정 + RENDER 환경변수 존재 → FastAPI 미배포 상태
+const IS_RENDER_WITHOUT_FASTAPI =
+  !process.env.FASTAPI_URL && !!process.env.RENDER;
+
+console.log(
+  `[field-routes] FastAPI 주소: ${FASTAPI_BASE}` +
+  (IS_RENDER_WITHOUT_FASTAPI ? " ⚠ Render 환경 — FastAPI 미배포, 비전 분석 비활성" : "")
+);
 
 // FastAPI 가용성 확인 (비동기, 서버 시작을 막지 않음)
 (async () => {
@@ -418,6 +426,17 @@ export function registerFieldRoutes(app: Express): void {
         return res.status(400).json({ error: "image 파일이 필요합니다" });
       }
 
+      // Render 프로덕션 환경에서 FastAPI 미배포 시 즉시 503 반환
+      if (IS_RENDER_WITHOUT_FASTAPI) {
+        return res.status(503).json({
+          error: "FASTAPI_NOT_DEPLOYED",
+          message:
+            "비전 분석 기능은 로컬 개발 환경에서만 사용 가능합니다. " +
+            "PC에서 npm run dev:all 명령으로 FastAPI와 Node.js를 함께 시작하고, " +
+            "Expo를 EXPO_PUBLIC_DOMAIN=http://<컴퓨터_IP>:5001 로 실행하세요.",
+        });
+      }
+
       const {
         project_name,
         current_amp,
@@ -464,12 +483,17 @@ export function registerFieldRoutes(app: Express): void {
 
         // ── 3. FastAPI /analyze-welding 호출 (quick 모드) ──────────────────
         // 클라이언트가 보낸 파일 버퍼를 그대로 FastAPI에 전달 (재인코딩 없음)
-        const formData = new FormData();
-        formData.append(
-          "file",
-          new Blob([file.buffer as unknown as ArrayBuffer], { type: file.mimetype || "image/jpeg" }),
-          file.originalname || "weld.jpg"
+        // Buffer(Uint8Array 서브클래스)를 그대로 전달 — Blob이 byteOffset/byteLength를 참조해
+        // multer 메모리 풀 공유 슬라이스 문제 없이 정확한 바이트 범위만 캡처한다.
+        const fileBlob = new Blob(
+          [file.buffer.buffer.slice(
+            file.buffer.byteOffset,
+            file.buffer.byteOffset + file.buffer.byteLength
+          )],
+          { type: file.mimetype || "image/jpeg" }
         );
+        const formData = new FormData();
+        formData.append("file", fileBlob, file.originalname || "weld.jpg");
         formData.append("process",               "FCAW");
         formData.append("posture",               "1G");
         formData.append("material",              "탄소강 평판");
@@ -589,9 +613,10 @@ export function registerFieldRoutes(app: Express): void {
         res.status(status).json({
           error: "ANALYSIS_FAILED",
           message: isFetch
-            ? "비전 분석 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."
+            ? `비전 분석 Python 서버(${FASTAPI_BASE})에 연결할 수 없습니다. ` +
+              "npm run dev:all 명령으로 FastAPI와 Node.js를 함께 시작했는지 확인하세요."
             : isTimeout
-            ? "분석 시간이 초과됐습니다 (90초). 다시 시도해 주세요."
+            ? `비전 분석 시간 초과 (90초). ${FASTAPI_BASE} 서버 응답을 기다리다 중단됐습니다.`
             : e.message ?? "분석 실패",
         });
       } finally {
