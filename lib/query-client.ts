@@ -44,6 +44,13 @@ export function getApiUrl(): string {
 
   // 프로덕션 또는 감지 실패 → Render 서버
   const fallback = configured || PRODUCTION_URL;
+  if (__DEV__) {
+    console.warn(
+      "[API] ⚠ DEV 모드이지만 로컬 IP 감지 실패 → 프로덕션 서버 사용: " + fallback + "\n" +
+      "      비전 분석이 동작하지 않을 수 있습니다.\n" +
+      "      해결: EXPO_PUBLIC_DOMAIN=http://<컴퓨터IP>:5001 환경 변수를 설정하여 Expo를 시작하세요."
+    );
+  }
   return fallback.endsWith("/") ? fallback : `${fallback}/`;
 }
 

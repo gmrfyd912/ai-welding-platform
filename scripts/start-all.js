@@ -212,19 +212,50 @@ const fastapi = startProcess(
   }
 );
 
+// ── FastAPI 준비 대기 (최대 30초) ─────────────────────────────────
+// FastAPI가 완전히 기동된 뒤 Node.js를 시작하여 시작 직후 health-ping 경고를 방지한다.
+async function waitForFastAPI(port, maxWaitMs = 30_000) {
+  const http   = require("http");
+  const start  = Date.now();
+  let attempt  = 0;
+  console.log(color("cyan", `[start-all] FastAPI 기동 대기 (최대 ${maxWaitMs / 1000}초)...`));
+  while (Date.now() - start < maxWaitMs) {
+    const ok = await new Promise((resolve) => {
+      const req = http.get(`http://127.0.0.1:${port}/docs`, (res) => {
+        resolve(res.statusCode < 400);
+        res.resume();
+      });
+      req.on("error", () => resolve(false));
+      req.setTimeout(1_500, () => { req.destroy(); resolve(false); });
+    });
+    if (ok) {
+      console.log(color("cyan", `[start-all] ✅ FastAPI 준비 완료 (${attempt + 1}회 시도) — http://127.0.0.1:${port}`));
+      return true;
+    }
+    attempt++;
+    await new Promise((r) => setTimeout(r, 1_500));
+  }
+  console.warn(color("yellow", `[start-all] ⚠ FastAPI ${maxWaitMs / 1000}초 내 응답 없음 — 비전 분석이 동작하지 않을 수 있습니다`));
+  return false;
+}
+
 // ── Node.js (tsx dev) ──────────────────────────────────────────
-const nodeServer = startProcess(
-  "Node",
-  process.platform === "win32" ? "npx.cmd" : "npx",
-  ["cross-env", "NODE_ENV=development", "tsx", "watch", "--env-file=.env", "server/index.ts"],
-  { PORT: NODE_PORT, FASTAPI_URL: `http://127.0.0.1:${FASTAPI_PORT}` }
-);
+// FastAPI 준비 완료 후 Node.js 시작 (준비 실패해도 Node는 시작)
+let nodeServer;
+waitForFastAPI(FASTAPI_PORT).finally(() => {
+  nodeServer = startProcess(
+    "Node",
+    process.platform === "win32" ? "npx.cmd" : "npx",
+    ["cross-env", "NODE_ENV=development", "tsx", "watch", "--env-file=.env", "server/index.ts"],
+    { PORT: NODE_PORT, FASTAPI_URL: `http://127.0.0.1:${FASTAPI_PORT}` }
+  );
+});
 
 // ── 종료 처리 ──────────────────────────────────────────────────
 function shutdown() {
   console.log("\n[start-all] 종료 중...");
   fastapi.kill();
-  nodeServer.kill();
+  if (nodeServer) nodeServer.kill();
   process.exit(0);
 }
 process.on("SIGINT",  shutdown);

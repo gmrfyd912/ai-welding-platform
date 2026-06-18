@@ -8,6 +8,24 @@ const upload = multer({ storage: multer.memoryStorage() });
 const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
 const ANALYSIS_TIMEOUT_MS = 90_000;
 
+console.log(`[field-routes] FastAPI 주소: ${FASTAPI_BASE}`);
+
+// FastAPI 가용성 확인 (비동기, 서버 시작을 막지 않음)
+(async () => {
+  try {
+    const r = await fetch(`${FASTAPI_BASE}/docs`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    console.log(`[field-routes] ✅ FastAPI 응답 확인 (${r.status}) — ${FASTAPI_BASE}`);
+  } catch (e: any) {
+    const cause = (e.cause as any)?.message ?? e.message ?? "알 수 없는 오류";
+    console.warn(`[field-routes] ⚠ FastAPI 미응답: ${FASTAPI_BASE}`);
+    console.warn(`[field-routes]   원인: ${cause}`);
+    console.warn(`[field-routes]   비전 분석 기능이 동작하지 않습니다.`);
+    console.warn(`[field-routes]   해결: npm run dev:all 로 FastAPI와 Node.js를 함께 시작하세요.`);
+  }
+})();
+
 async function _fieldFetch(url: string, options: RequestInit, ms: number) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
@@ -460,17 +478,20 @@ export function registerFieldRoutes(app: Express): void {
         formData.append("ai_model",              "gpt");
         formData.append("admin_feedback",        "");
         formData.append("user_history",          "");
+        formData.append("measurement_context",   "");
         formData.append("plate_thickness",       "");
         formData.append("pipe_outer_diameter_mm","");
         formData.append("language",              "ko");
         formData.append("analysis_mode",         "quick");
         formData.append("is_fillet",             "false");
         formData.append("has_laser",             "false");
-        formData.append("laser_angle_deg",       "90");
+        formData.append("laser_angle_deg",       "45");
         formData.append("shooting_angle_deg",    "90");
 
+        const faUrl = `${FASTAPI_BASE}/analyze-welding`;
+        console.log(`[field/analysis] FastAPI 호출: POST ${faUrl} | 파일: ${file.size}B | 모드: quick`);
         const faResp = await _fieldFetch(
-          `${FASTAPI_BASE}/analyze-welding`,
+          faUrl,
           { method: "POST", body: formData },
           ANALYSIS_TIMEOUT_MS
         );
@@ -555,11 +576,14 @@ export function registerFieldRoutes(app: Express): void {
 
         // 전체 진단 로그 출력
         console.error("─── [field/analysis] 오류 발생 ───────────────");
-        console.error("  message :", e.message?.slice(0, 300));
-        console.error("  status  :", e.status ?? "N/A");
-        console.error("  isFetch :", isFetch);
-        console.error("  timeout :", isTimeout);
-        console.error("  stack   :", e.stack?.split("\n").slice(0, 4).join(" | "));
+        console.error("  message   :", e.message?.slice(0, 300));
+        console.error("  cause     :", (e.cause as any)?.message ?? "N/A");
+        console.error("  causeCode :", (e.cause as any)?.code ?? "N/A");
+        console.error("  status    :", e.status ?? "N/A");
+        console.error("  isFetch   :", isFetch);
+        console.error("  timeout   :", isTimeout);
+        console.error("  faUrl     :", `${FASTAPI_BASE}/analyze-welding`);
+        console.error("  stack     :", e.stack?.split("\n").slice(0, 4).join(" | "));
         console.error("──────────────────────────────────────────────");
 
         res.status(status).json({
