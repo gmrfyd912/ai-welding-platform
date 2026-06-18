@@ -1,7 +1,9 @@
 import type { Express, Request, Response } from "express";
-import express from "express";
+import multer from "multer";
 import pool from "./db";
 import { ensureFieldTables } from "./schema";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
 const ANALYSIS_TIMEOUT_MS = 90_000;
@@ -373,8 +375,8 @@ export function registerFieldRoutes(app: Express): void {
   });
 
   // ── 통합 비전 분석 ──────────────────────────────────────────────────────────
-  // POST /api/field/analysis
-  // body: { imageBase64, project_name?, current_amp?, voltage_volt?, worker_name? }
+  // POST /api/field/analysis  (multipart/form-data)
+  // fields: image(file), project_name?, current_amp?, voltage_volt?, worker_name?
   // 내부 흐름:
   //   1. 작업자 조회(없으면 생성) → record 생성
   //   2. FastAPI /analyze-welding 호출 (quick 모드)
@@ -382,25 +384,24 @@ export function registerFieldRoutes(app: Express): void {
   //   4. 결과 반환
   app.post(
     "/api/field/analysis",
-    express.json({ limit: "30mb" }),
+    upload.single("image"),
     async (req: Request, res: Response) => {
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ error: "image 파일이 필요합니다" });
+      }
+
       const {
-        imageBase64,
         project_name,
         current_amp,
         voltage_volt,
         worker_name,
       } = req.body as {
-        imageBase64: string;
         project_name?: string;
-        current_amp?: number;
-        voltage_volt?: number;
+        current_amp?: string;
+        voltage_volt?: string;
         worker_name?: string;
       };
-
-      if (!imageBase64) {
-        return res.status(400).json({ error: "imageBase64 필수" });
-      }
 
       const client = await pool.connect();
       try {
@@ -428,19 +429,19 @@ export function registerFieldRoutes(app: Express): void {
           [
             userId,
             project_name ?? "",
-            current_amp ?? null,
-            voltage_volt ?? null,
+            current_amp ? parseFloat(current_amp) : null,
+            voltage_volt ? parseFloat(voltage_volt) : null,
           ]
         );
         const recordId: number = recRes.rows[0].id;
 
         // ── 3. FastAPI /analyze-welding 호출 (quick 모드) ──────────────────
-        const imgBuf = Buffer.from(imageBase64, "base64");
+        // 클라이언트가 보낸 파일 버퍼를 그대로 FastAPI에 전달 (재인코딩 없음)
         const formData = new FormData();
         formData.append(
           "file",
-          new Blob([imgBuf], { type: "image/jpeg" }),
-          "weld.jpg"
+          new Blob([file.buffer as unknown as ArrayBuffer], { type: file.mimetype || "image/jpeg" }),
+          file.originalname || "weld.jpg"
         );
         formData.append("process",               "FCAW");
         formData.append("posture",               "1G");

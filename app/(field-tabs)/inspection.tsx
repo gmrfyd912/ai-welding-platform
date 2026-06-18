@@ -17,7 +17,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
 import Colors from "@/constants/colors";
 import { apiUrl } from "@/lib/query-client";
 
@@ -167,29 +166,35 @@ export default function InspectionScreen() {
     if (!imageUri) return;
     setAnalyzing(true);
     try {
-      // ① 이미지 → base64
-      const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: "base64" as any,
-      });
+      // ① FormData 직접 구성 — base64 변환 없이 uri를 파일로 직배송
+      const formData = new FormData();
+      formData.append("image", {
+        uri:  imageUri,
+        name: "weld.jpg",
+        type: "image/jpeg",
+      } as any);
+      if (projectName.trim()) formData.append("project_name", projectName.trim());
+      if (current.trim())     formData.append("current_amp",  current.trim());
+      if (voltage.trim())     formData.append("voltage_volt", voltage.trim());
 
-      // ② POST /api/field/analysis (작업자 조회/생성 + FastAPI + DB 저장 통합 처리)
+      // ② POST — Content-Type 헤더 미지정 (RN이 boundary 포함 multipart/form-data로 자동 설정)
       const res = await fetch(apiUrl("api/field/analysis"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64,
-          project_name:  projectName.trim() || undefined,
-          current_amp:   current  ? parseFloat(current)  : undefined,
-          voltage_volt:  voltage  ? parseFloat(voltage)  : undefined,
-        }),
+        body:   formData,
       });
 
-      const data = await res.json();
+      // ③ 에러 응답의 실제 메시지를 파싱하여 노출
+      let data: any;
+      try { data = await res.json(); } catch { data = {}; }
       if (!res.ok) {
-        throw new Error(data.message ?? data.error ?? `서버 오류 ${res.status}`);
+        const msg =
+          data?.message ??
+          data?.error   ??
+          `서버 오류 ${res.status} — ${res.statusText}`;
+        throw new Error(msg);
       }
 
-      // ③ 성공 — 폼 초기화 후 결과 모달 표시
+      // ④ 성공 — 폼 초기화 후 결과 모달 표시
       setProjectName("");
       setCurrent("");
       setVoltage("");
