@@ -99,13 +99,15 @@ export default function LoginScreen() {
 
         {/* 메인 로고 섹션 - 여백 축소 */}
         <View style={styles.logoSection}>
-          <Image
-            source={require("@/assets/images/weldinglogo_icon.jpg")}
-            style={styles.mainLogo}
-            resizeMode="cover"
-          />
+          <View style={styles.logoClip}>
+            <Image
+              source={require("@/assets/images/_weldinglogo_icon.jpg")}
+              style={styles.mainLogo}
+              resizeMode="cover"
+            />
+          </View>
           <Text style={styles.appTitle}>{t("login_appTitle")}</Text>
-          <Text style={styles.appSubtitle}>AI-Powered Welding Report Developed by LJM</Text>
+          <Text style={styles.appSubtitle}>AI Welding Education Platform by LJM</Text>
         </View>
 
         {/* WELCOME BACK 구분선 */}
@@ -246,12 +248,13 @@ const styles = StyleSheet.create({
 
   // 로고 섹션 - 여백 대폭 축소
   logoSection: { alignItems: "center", marginTop: 20, marginBottom: 28 },
-  mainLogo: { width: 140, height: 140, borderRadius: 70 },
+  logoClip: { width: 298, height: 258, overflow: "hidden", alignItems: "center" },
+  mainLogo: { width: 298, height: 298, borderRadius: 149, marginTop: -20 },
   appTitle: {
     color: Colors.text,
     fontFamily: "Inter_700Bold",
-    fontSize: 24,
-    marginTop: 14,
+    fontSize: 32,
+    marginTop: 4,
     textAlign: "center",
   },
   appSubtitle: {
