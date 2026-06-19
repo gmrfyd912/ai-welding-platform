@@ -67,24 +67,28 @@ function ResultModal({
             <View style={modal.divider} />
             <View style={modal.statItem}>
               <Text style={modal.statVal}>
-                {result.avg_bead_width != null ? `${result.avg_bead_width}mm` : "—"}
+                {result.avg_bead_width != null
+                  ? `${result.avg_bead_width}mm`
+                  : "—"}
               </Text>
               <Text style={modal.statKey}>평균 비드폭</Text>
             </View>
             <View style={modal.divider} />
             <View style={modal.statItem}>
               <Text style={modal.statVal}>
-                {result.straightness_error != null ? `${result.straightness_error}mm` : "—"}
+                {result.straightness_error != null
+                  ? `${result.straightness_error}mm`
+                  : "—"}
               </Text>
               <Text style={modal.statKey}>직진도 오차</Text>
             </View>
           </View>
 
           {/* 결함 목록 */}
-          {result.defect_count > 0 ? (
+          {(result.defect_count ?? 0) > 0 && Array.isArray(result.defects) && result.defects.length > 0 ? (
             <View style={modal.defectBox}>
               <Text style={modal.defectTitle}>
-                탐지된 결함 {result.defect_count}건
+                {`탐지된 결함 ${result.defect_count}건`}
               </Text>
               {result.defects.map((d, i) => (
                 <View key={i} style={modal.defectRow}>
@@ -101,14 +105,18 @@ function ResultModal({
                       },
                     ]}
                   />
-                  <Text style={modal.defectName}>{d.name}</Text>
-                  <Text style={modal.defectConf}>{d.confidence}%</Text>
+                  <Text style={modal.defectName}>
+                    {String(d.name ?? "알 수 없는 결함")}
+                  </Text>
+                  <Text style={modal.defectConf}>
+                    {`${d.confidence ?? 0}%`}
+                  </Text>
                 </View>
               ))}
             </View>
           ) : (
             <View style={modal.noDefectBox}>
-              <Text style={modal.noDefectText}>결함 미탐지 ✓</Text>
+              <Text style={modal.noDefectText}>{"결함 미탐지 ✓"}</Text>
             </View>
           )}
 
@@ -164,11 +172,7 @@ export default function InspectionScreen() {
     if (!imageUri) return;
     setAnalyzing(true);
     try {
-      // ① URI 보정:
-      //    - Android 갤러리: content://media/... 형태 → XHR이 직접 읽음
-      //    - Android 카메라: file:///... 형태 → 그대로 사용
-      //    - iOS: file:///... 형태 → 그대로 사용
-      //    - 혹시 절대경로만 온 경우 file:// 접두사 추가
+      // ① URI 보정
       const normalizedUri =
         imageUri.startsWith("file://") ||
         imageUri.startsWith("content://") ||
@@ -187,18 +191,17 @@ export default function InspectionScreen() {
       if (current.trim())     formData.append("current_amp",  current.trim());
       if (voltage.trim())     formData.append("voltage_volt", voltage.trim());
 
-      // ③ XMLHttpRequest 사용 — global fetch(expo/fetch)와 달리
-      //    RN 네이티브 파일 I/O를 경유하므로 content:// + file:// URI 모두 지원
+      // ③ XMLHttpRequest — RN 네이티브 파일 I/O (content:// + file:// 모두 지원)
       const uploadUrl = apiUrl("api/field/analysis");
       console.log("[inspection] 분석 API 요청 URL:", uploadUrl);
-      const data = await new Promise<any>((resolve, reject) => {
+      const raw = await new Promise<any>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", uploadUrl);
         xhr.timeout = 90_000;
 
         xhr.onload = () => {
-          console.log("[inspection] XHR 응답:", xhr.status, xhr.responseText.slice(0, 200));
-          let parsed: any = {};
+          console.log("[inspection] XHR 응답:", xhr.status, xhr.responseText.slice(0, 300));
+          let parsed: any = null;
           try { parsed = JSON.parse(xhr.responseText); } catch { /* 빈 응답 */ }
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve(parsed);
@@ -207,7 +210,7 @@ export default function InspectionScreen() {
               parsed?.message ??
               parsed?.error   ??
               `서버 오류 ${xhr.status} (${xhr.statusText})`;
-            reject(new Error(msg));
+            reject(new Error(String(msg)));
           }
         };
         xhr.onerror   = () => reject(new Error("네트워크 오류 — 서버에 연결할 수 없습니다"));
@@ -215,16 +218,43 @@ export default function InspectionScreen() {
         xhr.send(formData);
       });
 
-      // ④ 성공 — 폼·이미지 초기화 후 결과 모달 표시
+      // ④ 응답 검증: 예상치 못한 형식이 오면 크래시하지 않도록 정규화
+      if (!raw || typeof raw !== "object") {
+        throw new Error("서버 응답 형식이 올바르지 않습니다. 다시 시도해 주세요.");
+      }
+      if (raw.error || raw.message) {
+        // 200이지만 에러 바디인 경우 대비
+        const maybeErr = raw.message ?? raw.error;
+        if (typeof maybeErr === "string" && !raw.inspection_id) {
+          throw new Error(maybeErr);
+        }
+      }
+      const normalized: AnalysisResult = {
+        inspection_id:      Number(raw.inspection_id ?? 0),
+        final_status:       raw.final_status === "PASS" ? "PASS" : "FAIL",
+        ai_score:           raw.ai_score != null ? Number(raw.ai_score) : null,
+        avg_bead_width:     raw.avg_bead_width != null ? Number(raw.avg_bead_width) : null,
+        straightness_error: raw.straightness_error != null ? Number(raw.straightness_error) : null,
+        defect_count:       Number(raw.defect_count ?? 0),
+        defects: Array.isArray(raw.defects)
+          ? raw.defects.map((d: any) => ({
+              name:       String(d?.name       ?? "알 수 없는 결함"),
+              severity:   String(d?.severity   ?? "보통"),
+              confidence: Math.round(Number(d?.confidence ?? 0)),
+            }))
+          : [],
+      };
+
+      // ⑤ 성공 — 폼·이미지 초기화 후 결과 모달 표시
       setProjectName("");
       setCurrent("");
       setVoltage("");
       setImageUri(null);
-      setResult(data as AnalysisResult);
+      setResult(normalized);
     } catch (e: any) {
       Alert.alert(
         "분석 실패",
-        e.message ?? "알 수 없는 오류가 발생했습니다.",
+        e?.message ?? "알 수 없는 오류가 발생했습니다.",
         [{ text: "확인" }],
       );
     } finally {
