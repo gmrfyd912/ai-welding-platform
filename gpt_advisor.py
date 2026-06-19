@@ -2,7 +2,17 @@ import os
 import json
 from openai import AsyncOpenAI
 
-client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+# Lazy client — created on first call so the server starts even without OPENAI_API_KEY.
+_client: AsyncOpenAI | None = None
+
+def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        api_key = os.environ.get("OPENAI_API_KEY") or ""
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
+        _client = AsyncOpenAI(api_key=api_key)
+    return _client
 
 
 def _build_system_prompt(
@@ -288,7 +298,7 @@ async def get_expert_advice(
             },
         })
 
-    response = await client.chat.completions.create(
+    response = await _get_client().chat.completions.create(
         model="gpt-4o",
         response_format={"type": "json_object"},
         max_tokens=2200,

@@ -184,27 +184,30 @@ if (!fs.existsSync(mainPy)) {
   process.exit(1);
 }
 
-// uvicorn 실행 파일 탐색 (우선순위 순)
-const UVICORN_CANDIDATES = [
-  process.env.UVICORN_PATH,                                                          // 환경 변수 우선
-  path.join(process.env.APPDATA ?? "", "Python", "Python313", "Scripts", "uvicorn.exe"), // Windows 사용자 Python
-  path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python313", "Scripts", "uvicorn.exe"),
-  "/usr/local/bin/uvicorn",                                                           // Linux/Mac
-  "/usr/bin/uvicorn",
-  "uvicorn",                                                                          // PATH 폴백
+// Python 실행 파일 탐색 (우선순위 순)
+// uvicorn.exe 대신 `python -m uvicorn`을 사용 → pip --user 설치된 uvicorn도 인식
+const PYTHON_CANDIDATES = [
+  process.env.PYTHON_PATH,                                                            // 환경 변수 우선
+  path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python313", "python.exe"), // winget/installer
+  path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python312", "python.exe"),
+  path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python311", "python.exe"),
+  "/usr/bin/python3",                                                                 // Linux/Mac
+  "/usr/local/bin/python3",
+  "python3",                                                                          // PATH 폴백
+  "python",
 ];
-const uvicornCmd = UVICORN_CANDIDATES.find(
-  (p) => p && (p === "uvicorn" || fs.existsSync(p))
-) ?? "uvicorn";
-console.log(color("cyan", `[FastAPI] uvicorn: ${uvicornCmd}`));
+const pythonCmd = PYTHON_CANDIDATES.find(
+  (p) => p && (p === "python3" || p === "python" || fs.existsSync(p))
+) ?? "python";
+console.log(color("cyan", `[FastAPI] Python: ${pythonCmd}`));
 
-// PYTHONPATH: uvicorn의 site-packages 경로 추가 (openai/anthropic 포함)
+// PYTHONPATH: 사용자 site-packages 경로 추가 (pip --user 설치 패키지 접근)
 const EXTRA_PYTHONPATH = path.join(process.env.APPDATA ?? "", "Python", "Python313", "site-packages");
 
 const fastapi = startProcess(
   "FastAPI",
-  uvicornCmd,
-  ["main:app", "--host", "0.0.0.0", "--port", FASTAPI_PORT, "--reload"],
+  pythonCmd,
+  ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", FASTAPI_PORT, "--reload"],
   {
     ...dotEnvVars,                                                         // .env 전체 주입
     FASTAPI_PORT,
