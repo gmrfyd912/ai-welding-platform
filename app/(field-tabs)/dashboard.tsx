@@ -97,12 +97,16 @@ export default function DashboardScreen() {
             try {
               setClearing(true);
               const res = await fetch(apiUrl("api/field/clear"), { method: "DELETE" });
-              const json = await res.json();
-              if (!res.ok) throw new Error(json.error ?? "초기화 실패");
-              Alert.alert("초기화 완료", "모든 검사 데이터가 삭제되었습니다.", [{ text: "확인" }]);
+              if (!res.ok) {
+                let msg = `서버 오류 (HTTP ${res.status})`;
+                try { msg = (await res.json()).error ?? msg; } catch {}
+                throw new Error(msg);
+              }
+              await res.json();
               await fetchSummary();
+              Alert.alert("초기화 완료", "모든 검사 데이터가 삭제되었습니다.", [{ text: "확인" }]);
             } catch (e: any) {
-              Alert.alert("오류", e.message);
+              Alert.alert("초기화 실패", e.message ?? "알 수 없는 오류가 발생했습니다.");
             } finally {
               setClearing(false);
             }
