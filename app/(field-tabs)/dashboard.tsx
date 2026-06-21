@@ -44,6 +44,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -83,6 +84,34 @@ export default function DashboardScreen() {
     }
   };
 
+  const handleClear = () => {
+    Alert.alert(
+      "데이터 전체 초기화",
+      "정말 모든 검사 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "전체 삭제",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setClearing(true);
+              const res = await fetch(apiUrl("api/field/clear"), { method: "DELETE" });
+              const json = await res.json();
+              if (!res.ok) throw new Error(json.error ?? "초기화 실패");
+              Alert.alert("초기화 완료", "모든 검사 데이터가 삭제되었습니다.", [{ text: "확인" }]);
+              await fetchSummary();
+            } catch (e: any) {
+              Alert.alert("오류", e.message);
+            } finally {
+              setClearing(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const totals = data?.totals;
   const topDefects = data?.top_defects ?? [];
   const topWelders = data?.top_welders ?? [];
@@ -110,20 +139,36 @@ export default function DashboardScreen() {
           <Text style={styles.title}>작업 통계 대시보드</Text>
           <Text style={styles.subtitle}>용접사별 불량률 및 합격률 현황</Text>
         </View>
-        <TouchableOpacity
-          style={styles.seedBtn}
-          onPress={handleSeed}
-          disabled={seeding || loading}
-        >
-          {seeding ? (
-            <ActivityIndicator size="small" color={Colors.warning} />
-          ) : (
-            <>
-              <Text style={styles.seedIcon}>🧪</Text>
-              <Text style={styles.seedText}>더미 생성</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.headerBtns}>
+          <TouchableOpacity
+            style={styles.seedBtn}
+            onPress={handleSeed}
+            disabled={seeding || clearing || loading}
+          >
+            {seeding ? (
+              <ActivityIndicator size="small" color={Colors.warning} />
+            ) : (
+              <>
+                <Text style={styles.seedIcon}>🧪</Text>
+                <Text style={styles.seedText}>더미 생성</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.clearBtn}
+            onPress={handleClear}
+            disabled={clearing || seeding || loading}
+          >
+            {clearing ? (
+              <ActivityIndicator size="small" color={Colors.danger} />
+            ) : (
+              <>
+                <Ionicons name="trash-outline" size={14} color={Colors.danger} />
+                <Text style={styles.clearText}>초기화</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (
@@ -270,6 +315,11 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 2,
   },
+  headerBtns: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
   seedBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -290,6 +340,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
     color: Colors.warning,
+  },
+  clearBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.danger,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 64,
+    justifyContent: "center",
+  },
+  clearText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.danger,
   },
   centerBox: {
     alignItems: "center",

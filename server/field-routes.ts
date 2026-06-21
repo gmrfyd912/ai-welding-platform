@@ -291,6 +291,23 @@ export function registerFieldRoutes(app: Express): void {
     }
   });
 
+  // ── 전체 데이터 초기화 ────────────────────────────────────────────────────
+  // DELETE /api/field/clear
+  // field_defects → field_inspections → field_weld_records 순으로 전부 삭제
+  // (field_users는 보존)
+  app.delete("/api/field/clear", async (_req: Request, res: Response) => {
+    try {
+      await pool.query("DELETE FROM field_defects");
+      await pool.query("DELETE FROM field_inspections");
+      await pool.query("DELETE FROM field_weld_records");
+      console.log("[field/clear] 검사 데이터 전체 삭제 완료");
+      res.json({ ok: true, message: "모든 검사 데이터가 삭제되었습니다." });
+    } catch (e: any) {
+      console.error("[field/clear] 삭제 실패:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── 더미 데이터 시드 ──────────────────────────────────────────────────────
   // POST /api/field/seed?records=20
   // 실제 배포 전 제거하거나 관리자 토큰 가드를 추가할 것
@@ -486,7 +503,7 @@ export function registerFieldRoutes(app: Express): void {
         // Buffer(Uint8Array 서브클래스)를 그대로 전달 — Blob이 byteOffset/byteLength를 참조해
         // multer 메모리 풀 공유 슬라이스 문제 없이 정확한 바이트 범위만 캡처한다.
         const fileBlob = new Blob(
-          [file.buffer.buffer.slice(
+          [(file.buffer.buffer as ArrayBuffer).slice(
             file.buffer.byteOffset,
             file.buffer.byteOffset + file.buffer.byteLength
           )],
