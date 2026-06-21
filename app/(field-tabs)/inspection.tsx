@@ -9,136 +9,26 @@ import {
   Image,
   ActivityIndicator,
   Alert,
-  Modal,
-  Pressable,
 } from "react-native";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { apiUrl } from "@/lib/query-client";
-
-// ── 결과 타입 ────────────────────────────────────────────────────────────────
-interface AnalysisResult {
-  inspection_id: number;
-  final_status: "PASS" | "FAIL";
-  ai_score: number | null;
-  avg_bead_width: number | null;
-  straightness_error: number | null;
-  defect_count: number;
-  defects: Array<{ name: string; severity: string; confidence: number }>;
-}
-
-// ── 결과 모달 ────────────────────────────────────────────────────────────────
-function ResultModal({
-  result,
-  onClose,
-}: {
-  result: AnalysisResult;
-  onClose: () => void;
-}) {
-  const isPass = result.final_status === "PASS";
-
-  return (
-    <Modal
-      visible
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={modal.overlay}>
-        <View style={modal.card}>
-          {/* 판정 배지 */}
-          <View style={[modal.badge, isPass ? modal.badgePass : modal.badgeFail]}>
-            <Text style={modal.badgeIcon}>{isPass ? "✅" : "❌"}</Text>
-            <Text style={[modal.badgeText, { color: isPass ? Colors.success : Colors.danger }]}>
-              {isPass ? "합격 (PASS)" : "불합격 (FAIL)"}
-            </Text>
-          </View>
-
-          {/* 수치 행 */}
-          <View style={modal.statsRow}>
-            <View style={modal.statItem}>
-              <Text style={modal.statVal}>
-                {result.ai_score != null ? `${result.ai_score}점` : "—"}
-              </Text>
-              <Text style={modal.statKey}>AI 점수</Text>
-            </View>
-            <View style={modal.divider} />
-            <View style={modal.statItem}>
-              <Text style={modal.statVal}>
-                {result.avg_bead_width != null
-                  ? `${result.avg_bead_width}mm`
-                  : "—"}
-              </Text>
-              <Text style={modal.statKey}>평균 비드폭</Text>
-            </View>
-            <View style={modal.divider} />
-            <View style={modal.statItem}>
-              <Text style={modal.statVal}>
-                {result.straightness_error != null
-                  ? `${result.straightness_error}mm`
-                  : "—"}
-              </Text>
-              <Text style={modal.statKey}>직진도 오차</Text>
-            </View>
-          </View>
-
-          {/* 결함 목록 */}
-          {(result.defect_count ?? 0) > 0 && Array.isArray(result.defects) && result.defects.length > 0 ? (
-            <View style={modal.defectBox}>
-              <Text style={modal.defectTitle}>
-                {`탐지된 결함 ${result.defect_count}건`}
-              </Text>
-              {result.defects.map((d, i) => (
-                <View key={i} style={modal.defectRow}>
-                  <View
-                    style={[
-                      modal.severityDot,
-                      {
-                        backgroundColor:
-                          d.severity === "심각"
-                            ? Colors.danger
-                            : d.severity === "보통"
-                            ? Colors.warning
-                            : Colors.textMuted,
-                      },
-                    ]}
-                  />
-                  <Text style={modal.defectName}>
-                    {String(d.name ?? "알 수 없는 결함")}
-                  </Text>
-                  <Text style={modal.defectConf}>
-                    {`${d.confidence ?? 0}%`}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={modal.noDefectBox}>
-              <Text style={modal.noDefectText}>{"결함 미탐지 ✓"}</Text>
-            </View>
-          )}
-
-          {/* 확인 버튼 */}
-          <Pressable style={modal.closeBtn} onPress={onClose}>
-            <Text style={modal.closeBtnText}>확인 — 다음 작업 계속</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-}
+import { useWelding, WeldingResult } from "@/context/WeldingContext";
+import { useAuth } from "@/context/AuthContext";
 
 // ── 검사 화면 ────────────────────────────────────────────────────────────────
 export default function InspectionScreen() {
   const insets = useSafeAreaInsets();
+  const { addResult } = useWelding();
+  const { user } = useAuth();
   const [projectName, setProjectName] = useState("");
   const [current, setCurrent] = useState("");
   const [voltage, setVoltage] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
 
   const pickFromCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -218,39 +108,85 @@ export default function InspectionScreen() {
         xhr.send(formData);
       });
 
-      // ④ 응답 검증: 예상치 못한 형식이 오면 크래시하지 않도록 정규화
+      // ④ 응답 검증
       if (!raw || typeof raw !== "object") {
         throw new Error("서버 응답 형식이 올바르지 않습니다. 다시 시도해 주세요.");
       }
-      if (raw.error || raw.message) {
-        // 200이지만 에러 바디인 경우 대비
-        const maybeErr = raw.message ?? raw.error;
-        if (typeof maybeErr === "string" && !raw.inspection_id) {
-          throw new Error(maybeErr);
-        }
+      if (!raw.inspection_id && (raw.error || raw.message)) {
+        throw new Error(String(raw.message ?? raw.error ?? "분석 실패"));
       }
-      const normalized: AnalysisResult = {
-        inspection_id:      Number(raw.inspection_id ?? 0),
-        final_status:       raw.final_status === "PASS" ? "PASS" : "FAIL",
-        ai_score:           raw.ai_score != null ? Number(raw.ai_score) : null,
-        avg_bead_width:     raw.avg_bead_width != null ? Number(raw.avg_bead_width) : null,
-        straightness_error: raw.straightness_error != null ? Number(raw.straightness_error) : null,
-        defect_count:       Number(raw.defect_count ?? 0),
-        defects: Array.isArray(raw.defects)
-          ? raw.defects.map((d: any) => ({
-              name:       String(d?.name       ?? "알 수 없는 결함"),
-              severity:   String(d?.severity   ?? "보통"),
-              confidence: Math.round(Number(d?.confidence ?? 0)),
-            }))
-          : [],
+
+      // ⑤ WeldingResult 구성 — 진단 리포트 페이지(diagnosis/[id])와 동일한 구조
+      const fa = (raw.full_analysis ?? {}) as Record<string, any>;
+      const aiScore = typeof fa.aiScore === "number" ? fa.aiScore : Number(raw.ai_score ?? 0);
+      const grade =
+        aiScore >= 90 ? "S" :
+        aiScore >= 80 ? "A" :
+        aiScore >= 70 ? "B" :
+        aiScore >= 60 ? "C" : "D";
+
+      const avgBeadWidth: number | null = raw.avg_bead_width != null ? Number(raw.avg_bead_width) : null;
+      const straightnessError: number | null = raw.straightness_error != null ? Number(raw.straightness_error) : null;
+
+      const weldingResult: WeldingResult = {
+        id: `field_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        userId: user?.id ?? "field",
+        userName: user?.name ?? "현장 작업자",
+        userProfileUri: user?.profilePhotoUri,
+        userCourseName: user?.courseName,
+        photoUri: normalizedUri,
+        photos: { front: normalizedUri },
+        process: "FCAW",
+        posture: "1G",
+        material: "탄소강 평판",
+        selfScore: 0,
+        aiScore,
+        grade,
+        timestamp: Date.now(),
+        beadAnalysis: fa.beadAnalysis ?? {
+          totalScore: aiScore,
+          width: {
+            value: avgBeadWidth != null ? `${avgBeadWidth}mm` : "—",
+            score: 70,
+          },
+          straightness: {
+            value: straightnessError != null ? `${straightnessError}mm 이탈` : "—",
+            score: 70,
+          },
+          height: null,
+        },
+        // FastAPI 전체 결함 배열(detected 포함) 우선, 없으면 검출된 결함만 매핑
+        defects: Array.isArray(fa.defects) ? fa.defects : (
+          Array.isArray(raw.defects) ? raw.defects.map((d: any) => ({
+            name:       String(d.name ?? "알 수 없는 결함"),
+            detected:   true,
+            severity:   (d.severity ?? "보통") as "없음" | "경미" | "보통" | "심각",
+            confidence: Number(d.confidence ?? 0),
+            standard:   "선급" as const,
+            measured:   "",
+            limit:      "",
+            result:     "불합격" as const,
+          })) : []
+        ),
+        defectLocations: fa.defectLocations ?? [],
+        improvements:    fa.improvements ?? [],
+        comprehensiveReport: fa.comprehensiveReport ?? undefined,
+        overallVerdict:  raw.final_status === "PASS" ? "PASS" : "FAIL",
+        top3Defects:     fa.top3Defects ?? [],
+        trendScores:     [],
+        filletAnalysis:  null,
+        isFillet:        false,
+        laserAnalysis:   fa.laserAnalysis ?? null,
       };
 
-      // ⑤ 성공 — 폼·이미지 초기화 후 결과 모달 표시
+      // ⑥ 폼 초기화 후 진단 리포트 화면으로 이동
       setProjectName("");
       setCurrent("");
       setVoltage("");
       setImageUri(null);
-      setResult(normalized);
+
+      await addResult(weldingResult);
+      router.push(`/diagnosis/${weldingResult.id}`);
     } catch (e: any) {
       Alert.alert(
         "분석 실패",
@@ -265,166 +201,159 @@ export default function InspectionScreen() {
   const canAnalyze = !!imageUri && !analyzing;
 
   return (
-    <>
-      <View style={{ flex: 1, backgroundColor: Colors.bg }}>
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[
-            styles.container,
-            { paddingTop: 16, paddingBottom: insets.bottom + 80 },
-          ]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* 헤더 */}
-          <Text style={styles.title}>실시간 현장 검사</Text>
-          <Text style={styles.subtitle}>환경 입력 → 사진 등록 → AI 결함 분석</Text>
+    <View style={{ flex: 1, backgroundColor: Colors.bg }}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.container,
+          { paddingTop: 16, paddingBottom: insets.bottom + 80 },
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* 헤더 */}
+        <Text style={styles.title}>실시간 현장 검사</Text>
+        <Text style={styles.subtitle}>환경 입력 → 사진 등록 → AI 결함 분석</Text>
 
-          {/* 작업 환경 입력 폼 */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="settings-outline" size={18} color={Colors.primary} />
-              <Text style={styles.cardTitle}>작업 환경 입력</Text>
+        {/* 작업 환경 입력 폼 */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="settings-outline" size={18} color={Colors.primary} />
+            <Text style={styles.cardTitle}>작업 환경 입력</Text>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <View style={styles.labelRow}>
+              <Ionicons name="location-outline" size={15} color={Colors.textSecondary} />
+              <Text style={styles.fieldLabel}>프로젝트명 / 구역</Text>
             </View>
+            <TextInput
+              style={styles.input}
+              placeholder="예: 교량 보수공사 A구역"
+              placeholderTextColor={Colors.textMuted}
+              value={projectName}
+              onChangeText={setProjectName}
+              returnKeyType="next"
+            />
+          </View>
 
-            <View style={styles.fieldGroup}>
+          <View style={styles.rowFields}>
+            <View style={styles.halfField}>
               <View style={styles.labelRow}>
-                <Ionicons name="location-outline" size={15} color={Colors.textSecondary} />
-                <Text style={styles.fieldLabel}>프로젝트명 / 구역</Text>
+                <Ionicons name="flash-outline" size={15} color={Colors.warning} />
+                <Text style={styles.fieldLabel}>전류 (A)</Text>
               </View>
               <TextInput
                 style={styles.input}
-                placeholder="예: 교량 보수공사 A구역"
+                placeholder="예: 180"
                 placeholderTextColor={Colors.textMuted}
-                value={projectName}
-                onChangeText={setProjectName}
+                value={current}
+                onChangeText={setCurrent}
+                keyboardType="decimal-pad"
                 returnKeyType="next"
               />
             </View>
-
-            <View style={styles.rowFields}>
-              <View style={styles.halfField}>
-                <View style={styles.labelRow}>
-                  <Ionicons name="flash-outline" size={15} color={Colors.warning} />
-                  <Text style={styles.fieldLabel}>전류 (A)</Text>
-                </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="예: 180"
-                  placeholderTextColor={Colors.textMuted}
-                  value={current}
-                  onChangeText={setCurrent}
-                  keyboardType="decimal-pad"
-                  returnKeyType="next"
-                />
+            <View style={styles.halfField}>
+              <View style={styles.labelRow}>
+                <Ionicons name="thunderstorm-outline" size={15} color={Colors.primary} />
+                <Text style={styles.fieldLabel}>전압 (V)</Text>
               </View>
-              <View style={styles.halfField}>
-                <View style={styles.labelRow}>
-                  <Ionicons name="thunderstorm-outline" size={15} color={Colors.primary} />
-                  <Text style={styles.fieldLabel}>전압 (V)</Text>
-                </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="예: 24"
-                  placeholderTextColor={Colors.textMuted}
-                  value={voltage}
-                  onChangeText={setVoltage}
-                  keyboardType="decimal-pad"
-                  returnKeyType="done"
-                />
-              </View>
+              <TextInput
+                style={styles.input}
+                placeholder="예: 24"
+                placeholderTextColor={Colors.textMuted}
+                value={voltage}
+                onChangeText={setVoltage}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+              />
             </View>
           </View>
+        </View>
 
-          {/* 이미지 프리뷰 */}
-          <View style={styles.previewBox}>
-            {imageUri ? (
-              <>
-                <Image
-                  source={{ uri: imageUri }}
-                  style={styles.previewImage}
-                  resizeMode="contain"
-                />
-                <TouchableOpacity
-                  style={styles.removeBtn}
-                  onPress={() => setImageUri(null)}
-                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                >
-                  <Ionicons name="close-circle" size={30} color={Colors.danger} />
-                </TouchableOpacity>
-              </>
-            ) : (
-              <View style={styles.previewEmpty}>
-                <Ionicons name="image-outline" size={64} color={Colors.textMuted} />
-                <Text style={styles.previewEmptyTitle}>사진이 없습니다</Text>
-                <Text style={styles.previewEmptyHint}>
-                  아래 버튼으로 용접부 사진을 등록하세요
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* 사진 등록 버튼 */}
-          <View style={styles.photoRow}>
-            <TouchableOpacity
-              style={styles.photoBtn}
-              onPress={pickFromCamera}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="camera-outline" size={24} color={Colors.text} />
-              <Text style={styles.photoBtnText}>카메라 촬영</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.photoBtn, styles.photoBtnOutline]}
-              onPress={pickFromGallery}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="images-outline" size={24} color={Colors.primary} />
-              <Text style={[styles.photoBtnText, { color: Colors.primary }]}>갤러리 선택</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* 분석 버튼 */}
-          <TouchableOpacity
-            style={[styles.analyzeBtn, !canAnalyze && styles.analyzeBtnDisabled]}
-            onPress={handleAnalyze}
-            disabled={!canAnalyze}
-            activeOpacity={0.82}
-          >
-            {analyzing ? (
-              <>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.analyzeBtnText}>분석 중... (최대 90초)</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons
-                  name="rocket-outline"
-                  size={24}
-                  color={canAnalyze ? "#fff" : Colors.textMuted}
-                />
-                <Text
-                  style={[styles.analyzeBtnText, !canAnalyze && styles.analyzeBtnTextOff]}
-                >
-                  용접 결과 분석하기
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {!imageUri && (
-            <Text style={styles.analyzeHint}>
-              📌 사진을 등록하면 분석 버튼이 활성화됩니다
-            </Text>
+        {/* 이미지 프리뷰 */}
+        <View style={styles.previewBox}>
+          {imageUri ? (
+            <>
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+              <TouchableOpacity
+                style={styles.removeBtn}
+                onPress={() => setImageUri(null)}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              >
+                <Ionicons name="close-circle" size={30} color={Colors.danger} />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <View style={styles.previewEmpty}>
+              <Ionicons name="image-outline" size={64} color={Colors.textMuted} />
+              <Text style={styles.previewEmptyTitle}>사진이 없습니다</Text>
+              <Text style={styles.previewEmptyHint}>
+                아래 버튼으로 용접부 사진을 등록하세요
+              </Text>
+            </View>
           )}
-        </ScrollView>
-      </View>
+        </View>
 
-      {/* 결과 모달 */}
-      {result && (
-        <ResultModal result={result} onClose={() => setResult(null)} />
-      )}
-    </>
+        {/* 사진 등록 버튼 */}
+        <View style={styles.photoRow}>
+          <TouchableOpacity
+            style={styles.photoBtn}
+            onPress={pickFromCamera}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="camera-outline" size={24} color={Colors.text} />
+            <Text style={styles.photoBtnText}>카메라 촬영</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.photoBtn, styles.photoBtnOutline]}
+            onPress={pickFromGallery}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="images-outline" size={24} color={Colors.primary} />
+            <Text style={[styles.photoBtnText, { color: Colors.primary }]}>갤러리 선택</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 분석 버튼 */}
+        <TouchableOpacity
+          style={[styles.analyzeBtn, !canAnalyze && styles.analyzeBtnDisabled]}
+          onPress={handleAnalyze}
+          disabled={!canAnalyze}
+          activeOpacity={0.82}
+        >
+          {analyzing ? (
+            <>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.analyzeBtnText}>분석 중... (최대 90초)</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons
+                name="rocket-outline"
+                size={24}
+                color={canAnalyze ? "#fff" : Colors.textMuted}
+              />
+              <Text
+                style={[styles.analyzeBtnText, !canAnalyze && styles.analyzeBtnTextOff]}
+              >
+                용접 결과 분석하기
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {!imageUri && (
+          <Text style={styles.analyzeHint}>
+            📌 사진을 등록하면 분석 버튼이 활성화됩니다
+          </Text>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -505,62 +434,4 @@ const styles = StyleSheet.create({
     fontSize: 12, fontFamily: "Inter_400Regular",
     color: Colors.textMuted, textAlign: "center", marginTop: -8,
   },
-});
-
-const modal = StyleSheet.create({
-  overlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.75)",
-    alignItems: "center", justifyContent: "center", padding: 24,
-  },
-  card: {
-    width: "100%", backgroundColor: Colors.card,
-    borderRadius: 20, borderWidth: 1, borderColor: Colors.border,
-    padding: 24, gap: 18,
-  },
-  badge: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 10, borderRadius: 14, paddingVertical: 14,
-  },
-  badgePass: { backgroundColor: "rgba(0,214,143,0.12)" },
-  badgeFail: { backgroundColor: "rgba(255,59,85,0.12)" },
-  badgeIcon: { fontSize: 24 },
-  badgeText: { fontSize: 20, fontFamily: "Inter_700Bold" },
-
-  statsRow: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: Colors.surface,
-    borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
-    paddingVertical: 14,
-  },
-  statItem: { flex: 1, alignItems: "center", gap: 4 },
-  statVal: { fontSize: 17, fontFamily: "Inter_700Bold", color: Colors.text },
-  statKey: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
-  divider: { width: 1, height: 36, backgroundColor: Colors.border },
-
-  defectBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
-    padding: 14, gap: 8,
-  },
-  defectTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.danger },
-  defectRow: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-  },
-  severityDot: { width: 8, height: 8, borderRadius: 4 },
-  defectName: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.text },
-  defectConf: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.textSecondary },
-
-  noDefectBox: {
-    backgroundColor: "rgba(0,214,143,0.08)",
-    borderRadius: 12, padding: 14,
-    alignItems: "center",
-  },
-  noDefectText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: Colors.success },
-
-  closeBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 14, paddingVertical: 16,
-    alignItems: "center",
-  },
-  closeBtnText: { fontSize: 16, fontFamily: "Inter_700Bold", color: "#fff" },
 });

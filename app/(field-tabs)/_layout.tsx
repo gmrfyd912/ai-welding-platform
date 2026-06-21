@@ -22,7 +22,15 @@ export default function FieldTabLayout() {
         headerTitle: () => null,
         headerStyle: { backgroundColor: Colors.bg },
         headerShadowVisible: false,
-        headerLeft: () => null,
+        headerLeft: () => (
+          <Pressable
+            onPress={() => router.replace("/role-selection")}
+            style={{ marginLeft: 14, padding: 6 }}
+            hitSlop={10}
+          >
+            <Ionicons name="arrow-back" size={22} color={Colors.textSecondary} />
+          </Pressable>
+        ),
         headerRight: () => (
           <Pressable
             onPress={handleLogout}

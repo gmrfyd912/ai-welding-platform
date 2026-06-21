@@ -526,7 +526,7 @@ export function registerFieldRoutes(app: Express): void {
         formData.append("analysis_mode",         "quick");
         formData.append("is_fillet",             "false");
         formData.append("has_laser",             "false");
-        formData.append("laser_angle_deg",       "45");
+        formData.append("laser_angle_deg",       "90");
         formData.append("shooting_angle_deg",    "90");
 
         const faUrl = `${FASTAPI_BASE}/analyze-welding`;
@@ -601,12 +601,19 @@ export function registerFieldRoutes(app: Express): void {
 
         res.json({
           inspection_id:      inspectionId,
+          record_id:          recordId,
           final_status:       finalStatus,
           ai_score:           aiScore,
           avg_bead_width:     avgBeadWidth,
           straightness_error: straightnessError,
           defect_count:       detectedDefects.length,
           defects:            detectedDefects,
+          // 교육원 모드 진단 페이지(diagnosis/[id])에 필요한 전체 비전 분석 데이터
+          full_analysis: {
+            ...fa,
+            laserAnalysis:  fa.visionMeasurement?.laser_analysis ?? null,
+            filletAnalysis: null,
+          },
         });
       } catch (e: any) {
         const isFetch =
