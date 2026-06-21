@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,13 @@ import { apiUrl } from "@/lib/query-client";
 import { useWelding, WeldingResult } from "@/context/WeldingContext";
 import { useAuth } from "@/context/AuthContext";
 
+const LOADING_STEPS = [
+  "이미지 서버 전송 중...",
+  "AI 결함 탐지 중 (Roboflow)...",
+  "비드 치수 정밀 측정 중...",
+  "진단 리포트 생성 중...",
+] as const;
+
 // ── 검사 화면 ────────────────────────────────────────────────────────────────
 export default function InspectionScreen() {
   const insets = useSafeAreaInsets();
@@ -29,6 +36,19 @@ export default function InspectionScreen() {
   const [voltage, setVoltage] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [loadingStepIdx, setLoadingStepIdx] = useState(0);
+
+  // 분석 중 단계별 메시지를 2.5초 간격으로 순환
+  useEffect(() => {
+    if (!analyzing) {
+      setLoadingStepIdx(0);
+      return;
+    }
+    const id = setInterval(() => {
+      setLoadingStepIdx((prev) => (prev + 1) % LOADING_STEPS.length);
+    }, 2500);
+    return () => clearInterval(id);
+  }, [analyzing]);
 
   const pickFromCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -116,7 +136,7 @@ export default function InspectionScreen() {
         throw new Error(String(raw.message ?? raw.error ?? "분석 실패"));
       }
 
-      // ⑤ WeldingResult 구성 — 진단 리포트 페이지(diagnosis/[id])와 동일한 구조
+      // ⑤ FastAPI full_analysis 에서 WeldingResult 구성
       const fa = (raw.full_analysis ?? {}) as Record<string, any>;
       const aiScore = typeof fa.aiScore === "number" ? fa.aiScore : Number(raw.ai_score ?? 0);
       const grade =
@@ -125,8 +145,25 @@ export default function InspectionScreen() {
         aiScore >= 70 ? "B" :
         aiScore >= 60 ? "C" : "D";
 
+      // 용접 타입: FastAPI가 filletAnalysis를 반환하면 필릿, 없으면 맞대기
+      const detectedIsFillet: boolean = fa.isFillet ?? (fa.filletAnalysis != null);
+
       const avgBeadWidth: number | null = raw.avg_bead_width != null ? Number(raw.avg_bead_width) : null;
       const straightnessError: number | null = raw.straightness_error != null ? Number(raw.straightness_error) : null;
+
+      // 결함 배열 — FastAPI 전체(detected/not detected 포함) 우선
+      const defectsArr = Array.isArray(fa.defects) ? fa.defects : (
+        Array.isArray(raw.defects) ? raw.defects.map((d: any) => ({
+          name:       String(d.name ?? "알 수 없는 결함"),
+          detected:   true,
+          severity:   (d.severity ?? "보통") as "없음" | "경미" | "보통" | "심각",
+          confidence: Number(d.confidence ?? 0),
+          standard:   "선급" as const,
+          measured:   "",
+          limit:      "",
+          result:     "불합격" as const,
+        })) : []
+      );
 
       const weldingResult: WeldingResult = {
         id: `field_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -139,7 +176,7 @@ export default function InspectionScreen() {
         process: "FCAW",
         posture: "1G",
         material: "탄소강 평판",
-        selfScore: 0,
+        selfScore: 0,   // 현장 모드: 자체평가 없음 → diagnosis 페이지에서 해당 섹션 자동 숨김
         aiScore,
         grade,
         timestamp: Date.now(),
@@ -155,28 +192,25 @@ export default function InspectionScreen() {
           },
           height: null,
         },
-        // FastAPI 전체 결함 배열(detected 포함) 우선, 없으면 검출된 결함만 매핑
-        defects: Array.isArray(fa.defects) ? fa.defects : (
-          Array.isArray(raw.defects) ? raw.defects.map((d: any) => ({
-            name:       String(d.name ?? "알 수 없는 결함"),
-            detected:   true,
-            severity:   (d.severity ?? "보통") as "없음" | "경미" | "보통" | "심각",
-            confidence: Number(d.confidence ?? 0),
-            standard:   "선급" as const,
-            measured:   "",
-            limit:      "",
-            result:     "불합격" as const,
-          })) : []
-        ),
+        defects: defectsArr,
         defectLocations: fa.defectLocations ?? [],
-        improvements:    fa.improvements ?? [],
+        // 히트맵 오버레이(straightnessLines, defectLocations)를 front 사진에 연결
+        photoAnalyses: {
+          front: {
+            beadAnalysis: fa.beadAnalysis ?? null,
+            defects:      defectsArr,
+            defectLocations: fa.defectLocations ?? [],
+            straightnessLines: fa.straightnessLines ?? [],
+          },
+        },
+        improvements:   fa.improvements ?? [],
         comprehensiveReport: fa.comprehensiveReport ?? undefined,
-        overallVerdict:  raw.final_status === "PASS" ? "PASS" : "FAIL",
-        top3Defects:     fa.top3Defects ?? [],
-        trendScores:     [],
-        filletAnalysis:  null,
-        isFillet:        false,
-        laserAnalysis:   fa.laserAnalysis ?? null,
+        overallVerdict: raw.final_status === "PASS" ? "PASS" : "FAIL",
+        top3Defects:    fa.top3Defects ?? [],
+        trendScores:    [],
+        isFillet:       detectedIsFillet,
+        filletAnalysis: fa.filletAnalysis ?? null,
+        laserAnalysis:  fa.laserAnalysis ?? null,
       };
 
       // ⑥ 폼 초기화 후 진단 리포트 화면으로 이동
@@ -329,7 +363,7 @@ export default function InspectionScreen() {
           {analyzing ? (
             <>
               <ActivityIndicator size="small" color="#fff" />
-              <Text style={styles.analyzeBtnText}>분석 중... (최대 90초)</Text>
+              <Text style={styles.analyzeBtnText}>{LOADING_STEPS[loadingStepIdx]}</Text>
             </>
           ) : (
             <>
@@ -428,7 +462,7 @@ const styles = StyleSheet.create({
   analyzeBtnDisabled: {
     backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border,
   },
-  analyzeBtnText: { fontSize: 18, fontFamily: "Inter_700Bold", color: "#fff" },
+  analyzeBtnText: { fontSize: 17, fontFamily: "Inter_700Bold", color: "#fff" },
   analyzeBtnTextOff: { color: Colors.textMuted },
   analyzeHint: {
     fontSize: 12, fontFamily: "Inter_400Regular",

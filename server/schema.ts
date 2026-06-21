@@ -107,6 +107,10 @@ export async function ensureFieldTables(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_field_inspections_record
     ON field_inspections (record_id)
   `);
+  // weld_type 컬럼 — FastAPI 자동 판별 결과('butt' | 'fillet') 저장
+  await pool.query(`
+    ALTER TABLE field_inspections ADD COLUMN IF NOT EXISTS weld_type TEXT DEFAULT 'butt'
+  `);
   await pool.query(`
     -- 대시보드 쿼리: 기간별 합격/불합격 집계
     CREATE INDEX IF NOT EXISTS idx_field_inspections_status_created

@@ -576,16 +576,21 @@ export function registerFieldRoutes(app: Express): void {
           }));
 
         // ── 5. field_inspections 저장 ──────────────────────────────────────
+        // filletAnalysis가 null이 아니면 FastAPI가 필릿 용접으로 판별한 것
+        const detectedIsFillet: boolean = fa.filletAnalysis != null;
+        const detectedWeldType: string = detectedIsFillet ? "fillet" : "butt";
+
         const insRes = await client.query(
           `INSERT INTO field_inspections
-             (record_id, ppm_scale, avg_bead_width, straightness_error, final_status)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+             (record_id, ppm_scale, avg_bead_width, straightness_error, final_status, weld_type)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
           [
             recordId,
             vm.ppm ?? null,
             avgBeadWidth,
             straightnessError,
             finalStatus,
+            detectedWeldType,
           ]
         );
         const inspectionId: number = insRes.rows[0].id;
@@ -612,7 +617,9 @@ export function registerFieldRoutes(app: Express): void {
           full_analysis: {
             ...fa,
             laserAnalysis:  fa.visionMeasurement?.laser_analysis ?? null,
-            filletAnalysis: null,
+            filletAnalysis: fa.filletAnalysis ?? null,
+            isFillet:       detectedIsFillet,
+            weld_type:      detectedWeldType,
           },
         });
       } catch (e: any) {

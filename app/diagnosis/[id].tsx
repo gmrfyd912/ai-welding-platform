@@ -1689,9 +1689,11 @@ export default function DiagnosisScreen() {
           )}
         </SectionCard>
 
-        <SectionCard title={t("diag_selfCompare")} icon="scale-balance">
-          <ScoreCompareBar selfScore={result.selfScore} aiScore={result.aiScore} t={t} />
-        </SectionCard>
+        {result.selfScore > 0 && (
+          <SectionCard title={t("diag_selfCompare")} icon="scale-balance">
+            <ScoreCompareBar selfScore={result.selfScore} aiScore={result.aiScore} t={t} />
+          </SectionCard>
+        )}
 
         {displayReport && displayReport.improvements.length > 0 && (
           <SectionCard title={t("diag_improvements")} icon="lightbulb-on-outline">
@@ -1781,12 +1783,14 @@ export default function DiagnosisScreen() {
             </Text>
           </View>
         )}
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>{t("diag_selfScore")}</Text>
-          <Text style={[styles.infoValue, { color: getGradeColor(result.selfScore) }]}>
-            {result.selfScore}{t("points_suffix")} ({getGrade(result.selfScore)})
-          </Text>
-        </View>
+        {result.selfScore > 0 && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>{t("diag_selfScore")}</Text>
+            <Text style={[styles.infoValue, { color: getGradeColor(result.selfScore) }]}>
+              {result.selfScore}{t("points_suffix")} ({getGrade(result.selfScore)})
+            </Text>
+          </View>
+        )}
 
         <SectionCard title={t("diag_history")} icon="history">
           {[...userResults]
