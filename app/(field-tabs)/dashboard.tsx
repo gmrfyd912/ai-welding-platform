@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   Dimensions,
   Alert,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { PieChart } from "react-native-chart-kit";
 import Colors from "@/constants/colors";
@@ -39,7 +39,6 @@ const PIE_COLORS = ["#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF"];
 const RANK_ICONS = ["🥇", "🥈", "🥉"];
 
 export default function DashboardScreen() {
-  const insets = useSafeAreaInsets();
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,23 +46,35 @@ export default function DashboardScreen() {
   const [clearing, setClearing] = useState(false);
 
   const fetchSummary = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(apiUrl("api/field/dashboard/summary"));
+      const res = await fetch(apiUrl("api/field/dashboard/summary"), {
+        signal: controller.signal,
+      });
       if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
       const json = await res.json();
       setData(json);
     } catch (e: any) {
-      setError(e.message ?? "데이터를 불러오지 못했습니다");
+      const isTimeout = controller.signal.aborted || e.name === "AbortError";
+      setError(
+        isTimeout
+          ? "응답 시간 초과 — 서버가 실행 중인지 확인하세요"
+          : (e.message ?? "데이터를 불러오지 못했습니다"),
+      );
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchSummary();
-  }, [fetchSummary]);
+  useFocusEffect(
+    useCallback(() => {
+      fetchSummary();
+    }, [fetchSummary]),
+  );
 
   const handleSeed = async () => {
     try {
@@ -133,7 +144,7 @@ export default function DashboardScreen() {
       style={styles.scroll}
       contentContainerStyle={[
         styles.container,
-        { paddingTop: insets.top + 16, paddingBottom: 100 },
+        { paddingTop: 16, paddingBottom: 100 },
       ]}
       showsVerticalScrollIndicator={false}
     >

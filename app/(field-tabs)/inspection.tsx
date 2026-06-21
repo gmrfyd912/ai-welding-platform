@@ -271,7 +271,7 @@ export default function InspectionScreen() {
           style={styles.scroll}
           contentContainerStyle={[
             styles.container,
-            { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 80 },
+            { paddingTop: 16, paddingBottom: insets.bottom + 80 },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

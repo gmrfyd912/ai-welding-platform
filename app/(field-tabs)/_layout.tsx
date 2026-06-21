@@ -1,16 +1,37 @@
-import { Tabs } from "expo-router";
-import { Platform, StyleSheet, View } from "react-native";
+import { Tabs, useRouter } from "expo-router";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/context/AuthContext";
 
 export default function FieldTabLayout() {
   const isIOS = Platform.OS === "ios";
+  const { logout } = useAuth();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace("/login");
+  };
 
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
+        headerShown: true,
+        headerTitle: () => null,
+        headerStyle: { backgroundColor: Colors.bg },
+        headerShadowVisible: false,
+        headerLeft: () => null,
+        headerRight: () => (
+          <Pressable
+            onPress={handleLogout}
+            style={{ marginRight: 14, padding: 6 }}
+            hitSlop={10}
+          >
+            <Ionicons name="log-out-outline" size={22} color={Colors.textSecondary} />
+          </Pressable>
+        ),
         tabBarActiveTintColor: Colors.success,
         tabBarInactiveTintColor: Colors.tabInactive,
         tabBarStyle: {
