@@ -237,13 +237,27 @@ function setupErrorHandler(app: express.Application) {
 
   setupErrorHandler(app);
 
-  const port = parseInt(process.env.PORT || "5001", 10);
-  server.listen(
-  {
-    port,
-  },
-  () => {
+  const basePort = parseInt(process.env.PORT || "5001", 10);
+
+  /**
+   * EADDRINUSE 발생 시 포트를 1씩 올려 자동 재시도.
+   * 최대 5회(basePort+4까지) 시도 후 실패하면 프로세스 종료.
+   */
+  function tryListen(port: number, remaining: number): void {
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE" && remaining > 0) {
+        const next = port + 1;
+        log(`⚠ 포트 ${port} 사용 중 → 포트 ${next} 자동 전환 (남은 시도: ${remaining - 1}회)`);
+        tryListen(next, remaining - 1);
+      } else {
+        log(`서버 시작 실패 (${err.code ?? err.message})`);
+        process.exit(1);
+      }
+    });
+    server.listen({ port }, () => {
       log(`express server serving on port ${port}`);
-    },
-  );
+    });
+  }
+
+  tryListen(basePort, 5);
 })();
