@@ -228,7 +228,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
     공식: h = 격자변형량(px) / ppm / tan(laser_angle_deg)
     """
     try:
-        # [1단계] 이미지 로드 및 전처리
+        # ── [1단계] 이미지 로드 및 전처리 ──────────────────────────────────────
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
@@ -239,7 +239,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blurred, 50, 150)
 
-        # [2단계] 격자선 검출
+        # ── [2단계] 격자선 검출 ────────────────────────────────────────────────
         lines_raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=50,
                                     minLineLength=30, maxLineGap=10)
         if lines_raw is None or len(lines_raw) == 0:
@@ -247,7 +247,6 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
 
         h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
         v_lines = []
-
         for line in lines_raw:
             x1, y1, x2, y2 = line[0]
             length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
@@ -264,7 +263,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         if len(h_lines) < 3:
             return {"status": "error", "message": f"수평 격자선 부족 ({len(h_lines)}개 검출)"}
 
-        # [3단계] 비드 영역 vs 평탄 영역 분리
+        # ── [3단계] 비드 영역 vs 평탄 영역 분리 ───────────────────────────────
         if bead_polygon_pct:
             xs = [p["x_pct"] * w_img / 100 for p in bead_polygon_pct]
             ys = [p["y_pct"] * h_img / 100 for p in bead_polygon_pct]
@@ -280,7 +279,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
 
         bead_center_y = (bead_y_min + bead_y_max) / 2.0
 
-        # [4단계] 기준 격자 간격 계산 (평탄면 기준)
+        # ── [4단계] 기준 격자 간격 계산 (평탄면 기준) ─────────────────────────
         flat_ys = sorted([
             cy for (cy, cx, x1, y1, x2, y2, length) in h_lines
             if cy < bead_y_min or cy > bead_y_max
@@ -295,24 +294,41 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         else:
             ref_spacing_px = 20.0
 
-        laser_grid_spacing_mm = round(ref_spacing_px / ppm, 2)
+        # ── [4b단계] PPM 유효성 검사 및 폴백 ──────────────────────────────────
+        # 버그 원인: 마커가 작게 검출되거나 원거리 촬영 시 ppm < 8 → 20mm+ 출력
+        # 대책:
+        #   1순위: ArUco/Roboflow 제공 ppm (8~300 범위)
+        #   2순위: 격자 간격으로 역산 (DOE 레이저 표준 격자 피치 5mm 가정)
+        #   3순위: 스마트폰 20cm 촬영 기준 30px/mm 폴백
+        ppm_used = float(ppm) if (ppm and ppm > 0) else 0.0
+        ppm_source = "aruco"
+        if ppm_used < 8.0 or ppm_used > 300.0:
+            if ref_spacing_px >= 15.0:
+                # 5mm 격자 피치 가정으로 PPM 역산
+                estimated_ppm = ref_spacing_px / 5.0
+                if 8.0 <= estimated_ppm <= 300.0:
+                    ppm_used = estimated_ppm
+                    ppm_source = "grid_5mm_pitch"
+                else:
+                    ppm_used = 30.0
+                    ppm_source = "fallback_30px_mm"
+            else:
+                ppm_used = 30.0
+                ppm_source = "fallback_30px_mm"
 
-        # [5단계] 비드 위 격자 변형량 측정
-        bead_h_lines = [
-            (cy, cx, x1, y1, x2, y2, length)
-            for (cy, cx, x1, y1, x2, y2, length) in h_lines
-            if bead_y_min <= cy <= bead_y_max
-        ]
+        laser_grid_spacing_mm = round(ref_spacing_px / ppm_used, 2)
 
-        n_segments = 10
-        x_range = max(bead_x_max - bead_x_min, 1)
-        # tan(≥85°) → 사실상 무한대 → height_mm ≈ 0 버그 방지
-        # DOE 레이저는 보통 30°~60° 각도로 투사되므로 85° 이상은 물리적으로 무의미
+        # ── [5단계] 각도 상수 ──────────────────────────────────────────────────
+        # tan(≥85°) ≈ ∞ → height_mm ≈ 0 버그 방지 (이전 90° 기본값에서 발생)
         effective_laser_deg = min(laser_angle_deg, 80.0) if laser_angle_deg >= 85.0 else laser_angle_deg
-        tan_angle = max(math.tan(math.radians(effective_laser_deg)), 1e-9)
+        tan_angle   = max(math.tan(math.radians(effective_laser_deg)), 1e-9)
         sin_shooting = max(math.sin(math.radians(shooting_angle_deg)), 1e-9)
 
-        # 비드 중앙 y에 대한 예상 격자선 y (평탄면 기준 보간)
+        # 물리적 최대 높이 한계 = 10mm → 클램프 기준 픽셀 변위 계산
+        max_physical_h_mm = 10.0
+        max_deform_px = max_physical_h_mm * ppm_used * tan_angle * sin_shooting
+
+        # ── [5b단계] 비드 중앙 기준 y 보간 (평탄면 격자선 외삽) ───────────────
         above_ys = [cy for cy in flat_ys if cy < bead_y_min]
         below_ys = [cy for cy in flat_ys if cy > bead_y_max]
         if above_ys and below_ys:
@@ -327,23 +343,31 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         else:
             expected_center_y = bead_center_y
 
-        profile = []
-        heights_mm = []
+        # ── [6단계] 구간별 변위 측정 (raw, 부호 보정 전) ──────────────────────
+        bead_h_lines = [
+            (cy, cx, x1, y1, x2, y2, length)
+            for (cy, cx, x1, y1, x2, y2, length) in h_lines
+            if bead_y_min <= cy <= bead_y_max
+        ]
 
+        n_segments = 10
+        x_range    = max(bead_x_max - bead_x_min, 1)
+
+        # profile_raw: (x_pct, raw_deformation_px, actual_y_px)
+        profile_raw = []
         for i in range(n_segments):
-            x_lo = bead_x_min + i * x_range / n_segments
-            x_hi = bead_x_min + (i + 1) * x_range / n_segments
+            x_lo     = bead_x_min + i       * x_range / n_segments
+            x_hi     = bead_x_min + (i + 1) * x_range / n_segments
             x_center = (x_lo + x_hi) / 2.0
-            x_pct = round(x_center / w_img * 100, 2)
+            x_pct    = round(x_center / w_img * 100, 2)
 
-            # 이 x 구간에서 비드 위 수평선의 실제 y
             seg_ys = []
             for (cy, cx, x1, y1, x2, y2, length) in bead_h_lines:
                 lx_min = min(x1, x2)
                 lx_max = max(x1, x2)
                 if lx_max >= x_lo and lx_min <= x_hi:
                     if x2 != x1:
-                        t = max(0.0, min(1.0, (x_center - x1) / (x2 - x1)))
+                        t        = max(0.0, min(1.0, (x_center - x1) / (x2 - x1)))
                         y_interp = y1 + t * (y2 - y1)
                     else:
                         y_interp = (y1 + y2) / 2.0
@@ -352,88 +376,109 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             if not seg_ys:
                 continue
 
-            actual_y = float(np.median(seg_ys))
-            # [6단계] 양수 = 위로 휨 = 볼록 (비드 솟아오름)
-            # sin_shooting 보정: 비스듬히 촬영 시 격자 변형량이 압축되므로 복원
-            deformation_px = expected_center_y - actual_y
-            height_mm = round(deformation_px / sin_shooting / ppm / tan_angle, 2)
-            heights_mm.append(height_mm)
-            profile.append({"x_pct": x_pct, "height_mm": height_mm})
+            actual_y      = float(np.median(seg_ys))
+            # 이미지 좌표계: Y↓ 증가. 볼록 비드 = 격자선 위로 이동 = actual_y 감소
+            # ∴ deformation_px = expected - actual > 0 이 정방향(볼록 = 양수)
+            deform_px = expected_center_y - actual_y
+            profile_raw.append((x_pct, deform_px, actual_y))
 
-        if not heights_mm:
+        if not profile_raw:
             return {"status": "error", "message": "비드 위 격자 변형을 측정하지 못했습니다"}
 
-        # [7단계] 프로파일 통계
-        arr = np.array(heights_mm, dtype=np.float64)
-        max_h = round(float(arr.max()), 2)
-        min_h = round(float(arr.min()), 2)
-        avg_h = round(float(arr.mean()), 2)
-        variance = round(float(max_h - min_h), 2)
+        # ── [7단계] 부호 합의 보정 ────────────────────────────────────────────
+        # DOE 레이저 없이 weld edge 검출 시: 엣지가 baseline 아래 → 음수 지배
+        # 맞대기 비드는 거의 항상 볼록(convex) → 음수 지배 시 전체 부호 반전
+        deforms_only  = [d for (_, d, _) in profile_raw]
+        median_deform = float(np.median(deforms_only))
+        # 음수 지배(≤ -1px)이고 절대값이 의미 있는 경우만 반전
+        sign = -1.0 if (median_deform < -1.0 and abs(median_deform) > 1.0) else 1.0
 
-        if avg_h > 0.5:
-            convexity = "convex"
-        elif avg_h < -0.5:
-            convexity = "concave"
-        else:
-            convexity = "flat"
+        # ── [8단계] mm 변환 + 클램프 + 좌표 저장 ─────────────────────────────
+        profile    = []
+        heights_mm = []
+        for (x_pct, deform_px, actual_y) in profile_raw:
+            # 물리적 범위 초과 클램프 (잘못 검출된 선에 의한 이상값 방지)
+            clamped = max(-max_deform_px, min(max_deform_px, deform_px))
+            h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
+            heights_mm.append(h_mm)
+            profile.append({
+                "x_pct":        x_pct,
+                "height_mm":    h_mm,
+                # 각 구간의 실제 검출 y 좌표 저장 → maxPoint/minPoint 마커가
+                # 서로 다른 y 위치를 가리키도록 보장
+                "actual_y_pct": round(actual_y / h_img * 100, 2),
+            })
 
-        # [8단계] 격자선 시각화 데이터
+        # ── [9단계] 프로파일 통계 ─────────────────────────────────────────────
+        arr       = np.array(heights_mm, dtype=np.float64)
+        max_h     = round(float(arr.max()), 2)
+        min_h     = round(float(arr.min()), 2)
+        avg_h     = round(float(arr.mean()), 2)
+        variance  = round(float(max_h - min_h), 2)
+        convexity = "convex" if avg_h > 0.5 else ("concave" if avg_h < -0.5 else "flat")
+
+        # ── [10단계] 격자선 시각화 데이터 ────────────────────────────────────
         grid_lines_vis = []
         for (cy, cx, x1, y1, x2, y2, length) in h_lines[:20]:
             grid_lines_vis.append({
-                "x1_pct": round(x1 / w_img * 100, 2),
-                "y1_pct": round(y1 / h_img * 100, 2),
-                "x2_pct": round(x2 / w_img * 100, 2),
-                "y2_pct": round(y2 / h_img * 100, 2),
+                "x1_pct": round(x1 / w_img * 100, 2), "y1_pct": round(y1 / h_img * 100, 2),
+                "x2_pct": round(x2 / w_img * 100, 2), "y2_pct": round(y2 / h_img * 100, 2),
                 "type": "horizontal",
             })
         for (cx, cy, x1, y1, x2, y2, length) in v_lines[:10]:
             grid_lines_vis.append({
-                "x1_pct": round(x1 / w_img * 100, 2),
-                "y1_pct": round(y1 / h_img * 100, 2),
-                "x2_pct": round(x2 / w_img * 100, 2),
-                "y2_pct": round(y2 / h_img * 100, 2),
+                "x1_pct": round(x1 / w_img * 100, 2), "y1_pct": round(y1 / h_img * 100, 2),
+                "x2_pct": round(x2 / w_img * 100, 2), "y2_pct": round(y2 / h_img * 100, 2),
                 "type": "vertical",
             })
 
+        # ── [11단계] 최대/최소/최악 지점 좌표 추출 ───────────────────────────
         worst_idx = int(np.argmax(np.abs(arr)))
         max_idx   = int(np.argmax(arr))
         min_idx   = int(np.argmin(arr))
-        worst_pt  = profile[worst_idx] if worst_idx < len(profile) else None
-        max_pt    = profile[max_idx]   if max_idx   < len(profile) else None
-        min_pt    = profile[min_idx]   if min_idx   < len(profile) else None
+
+        # 겹침 방지: max/min 이 동일 인덱스면 양 끝으로 강제 분리
+        n_pts = len(profile)
+        if max_idx == min_idx and n_pts > 1:
+            max_idx = 0
+            min_idx = n_pts - 1
+
         bead_y_pct = round(bead_center_y / h_img * 100, 2)
 
+        def _pt(idx: int) -> dict:
+            p = profile[idx]
+            return {
+                "x_pct":      p["x_pct"],
+                # 실제 검출 y 우선, 없으면 비드 중앙 y 폴백
+                "y_pct":      p.get("actual_y_pct", bead_y_pct),
+                "height_mm":  p["height_mm"],
+            }
+
         return {
-            "status": "success",
-            "beadHeightMax": max_h,
-            "beadHeightMin": min_h,
-            "beadHeightAvg": avg_h,
-            "heightVariance": variance,
-            "convexity": convexity,
-            "convexityMm": round(abs(avg_h), 2),
+            "status":             "success",
+            "beadHeightMax":      max_h,
+            "beadHeightMin":      min_h,
+            "beadHeightAvg":      avg_h,
+            "heightVariance":     variance,
+            "convexity":          convexity,
+            "convexityMm":        round(abs(avg_h), 2),
             "laserGridSpacingMm": laser_grid_spacing_mm,
-            "profile": profile,
-            "gridLines": grid_lines_vis,
-            "worstPoint": {
-                "x_pct": worst_pt["x_pct"],
-                "y_pct": bead_y_pct,
-                "height_mm": heights_mm[worst_idx],
-            } if worst_pt else None,
-            # 최대/최소 높이 발생 좌표 (히트맵 마커용)
-            "maxPoint": {
-                "x_pct": max_pt["x_pct"],
-                "y_pct": bead_y_pct,
-                "height_mm": max_h,
-            } if max_pt else None,
-            "minPoint": {
-                "x_pct": min_pt["x_pct"],
-                "y_pct": bead_y_pct,
-                "height_mm": min_h,
-            } if min_pt else None,
-            "message": (f"격자 간격 {laser_grid_spacing_mm}mm | "
-                        f"수평선 {len(h_lines)}개 검출 | "
-                        f"유효각도 {effective_laser_deg}°"),
+            # profile 직렬화 시 실제 y 제외 (프론트 인터페이스 유지)
+            "profile":    [{"x_pct": p["x_pct"], "height_mm": p["height_mm"]} for p in profile],
+            "gridLines":  grid_lines_vis,
+            "worstPoint": _pt(worst_idx),
+            # 히트맵 마커: 각 점의 실제 y_pct가 다르므로 겹치지 않음
+            "maxPoint": _pt(max_idx),
+            "minPoint": _pt(min_idx),
+            "ppmUsed":   round(ppm_used, 2),
+            "ppmSource": ppm_source,
+            "message": (
+                f"격자 간격 {laser_grid_spacing_mm}mm | "
+                f"수평선 {len(h_lines)}개 검출 | "
+                f"PPM={ppm_used:.1f}({ppm_source}) | "
+                f"각도={effective_laser_deg}° | "
+                f"부호={'정방향' if sign > 0 else '반전'}"
+            ),
         }
 
     except Exception as e:
