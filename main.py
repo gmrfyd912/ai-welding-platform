@@ -713,6 +713,16 @@ async def analyze_welding_full(
         image_bytes=image_bytes,  # ArUco 호모그래피 보정 이미지 (원근 왜곡 제거 완료)
     )
 
+    # analyze_laser_grid 가 격자선 미검출로 clean_image_base64 를 비워 반환할 때
+    # pre-inpaint 이미지(robo_image_bytes)를 폴백으로 사용하여 ORIGINAL_FALLBACK 방지.
+    _clean_b64_final = vision_data.get("clean_image_base64", "")
+    if not _clean_b64_final and has_laser.lower() == "true":
+        try:
+            _clean_b64_final = base64.b64encode(robo_image_bytes).decode()
+            print(f"[FastAPI] clean_image_base64 폴백: pre-inpaint 이미지 사용 (len={len(_clean_b64_final)})")
+        except Exception as _fe:
+            print(f"[FastAPI] clean_image_base64 폴백 실패: {_fe}")
+
     fillet_result = calculate_fillet_analysis(vision_data, vision_data.get("ppm", 1), is_fillet_bool)
 
     # 마커/비드 미탐지 시 분석 중단 — 잘못된 사진(풍경·인물·흐릿) 또는
@@ -1061,7 +1071,8 @@ async def analyze_welding_full(
             "laser_analysis":        vision_data.get("laser_analysis"),
             "bead_profile_2d":       vision_data.get("bead_profile_2d"),
             # 히트맵 배경용 레이저 제거 이미지 (base64). DB 비저장 — 분석 직후 프론트에만 전달.
-            "clean_image_base64":    vision_data.get("clean_image_base64", ""),
+            # analyze_laser_grid 가 격자선 미검출로 실패하면 pre-inpaint(Roboflow 전송용) 이미지로 폴백.
+            "clean_image_base64":    _clean_b64_final,
             "debug_metrics":         vision_data.get("debug_metrics", {}),
         },
         # welding_calculator 원시 출력
@@ -1069,7 +1080,6 @@ async def analyze_welding_full(
         # 필렛 분석 (is_fillet=true 일 때만 non-null)
         "filletAnalysis": fillet_result,
     }
-    clean_b64_len = len(vision_data.get("clean_image_base64", ""))
-    print(f"[FastAPI:response] clean_image_base64 길이={clean_b64_len} | "
+    print(f"[FastAPI:response] clean_image_base64 길이={len(_clean_b64_final)} | "
           f"laser_status={vision_data.get('laser_analysis', {}).get('status') if vision_data.get('laser_analysis') else 'none'}")
     return convert_numpy_types(result)

@@ -351,10 +351,22 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
 
         if bead_polygon_pct and len(bead_polygon_pct) >= 3:
             # xs, ys 는 [3단계]에서 이미 계산된 변수 재사용
-            _li  = int(np.argmin(xs))   # 가장 왼쪽 꼭짓점
-            _ri  = int(np.argmax(xs))   # 가장 오른쪽 꼭짓점
-            x_left, y_left   = xs[_li], ys[_li]
-            x_right, y_right = xs[_ri], ys[_ri]
+            #
+            # ▲ 이전 버그: np.argmin(xs)로 좌측 꼭짓점을 찾으면 폴리곤 순서에 따라
+            #   상단 왼쪽 꼭짓점(y=bead_y_min)이 선택됨 → 기준선이 비드 상단으로 올라가
+            #   deform_px = baseline_y - actual_y < 0 (부호 역전) → h_mm = 0
+            # ▼ 수정: 좌/우 1/3 구간에서 y가 가장 큰 점(최하단 = Toe)을 선택
+            _third = (bead_x_max - bead_x_min) / 3.0
+            _left_zone  = [(px, py) for px, py in zip(xs, ys) if px <= bead_x_min + _third]
+            _right_zone = [(px, py) for px, py in zip(xs, ys) if px >= bead_x_max - _third]
+            if _left_zone and _right_zone:
+                x_left,  y_left  = max(_left_zone,  key=lambda p: p[1])  # 최하단 Toe-L
+                x_right, y_right = max(_right_zone, key=lambda p: p[1])  # 최하단 Toe-R
+            else:
+                _li = int(np.argmin(xs))
+                _ri = int(np.argmax(xs))
+                x_left,  y_left  = xs[_li], ys[_li]
+                x_right, y_right = xs[_ri], ys[_ri]
             dx_poly = x_right - x_left
             if dx_poly > 10:
                 _toe_m = (y_right - y_left) / dx_poly
@@ -363,7 +375,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             use_toe_baseline = True
             print(f"[LaserGrid] 이미지 {w_img}×{h_img} | Toe 직선 기준선:"
                   f" L({x_left:.0f},{y_left:.0f})→R({x_right:.0f},{y_right:.0f})"
-                  f" slope={_toe_m:.4f} c={_toe_c:.0f}")
+                  f" slope={_toe_m:.4f} c={_toe_c:.0f} [zone-bottommost]")
         else:
             print(f"[LaserGrid] 이미지 {w_img}×{h_img} | 폴리곤 없음 → 평탄면 외삽 폴백")
 
@@ -557,26 +569,29 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                 "type": "vertical",
             })
 
-        # ── [11단계] 최대/최소/최악 지점 좌표 추출 ───────────────────────────
-        # 비드 경계 구간(첫/마지막 1구간) 제외: 폴리곤 가장자리는 비드-모재 전환부로
-        # 격자선 왜곡이 발생하여 argmax/argmin 이 가장자리 노이즈를 픽킹하는 문제 방지
-        n_pts = len(arr)
-        if n_pts > 2:
-            _inner = arr[1:-1]
-            _off   = 1
-            worst_idx = int(np.argmax(np.abs(_inner))) + _off
-            max_idx   = int(np.argmax(_inner)) + _off
-            min_idx   = int(np.argmin(_inner)) + _off
-            if max_idx == min_idx:
-                max_idx = 1
-                min_idx = n_pts - 2
-        else:
-            worst_idx = int(np.argmax(np.abs(arr)))
-            max_idx   = int(np.argmax(arr))
-            min_idx   = int(np.argmin(arr))
-            if max_idx == min_idx and n_pts > 1:
-                max_idx = 0
-                min_idx = n_pts - 1
+        # ── [11단계] Strict ROI 마스킹: 폴리곤 x 경계 10% 여백 제외 후 argmax/argmin
+        # arr[1:-1] 같은 고정 트리밍 대신, 폴리곤 x_min~x_max 의 내부 80% 구간만 사용.
+        # 비드-모재 전환부(가장자리 10%)는 격자선 왜곡으로 노이즈 마커 이탈 발생 방지.
+        _bead_x_lo_pct = round(bead_x_min / w_img * 100, 2)
+        _bead_x_hi_pct = round(bead_x_max / w_img * 100, 2)
+        _x_span        = _bead_x_hi_pct - _bead_x_lo_pct
+        _roi_lo        = _bead_x_lo_pct + _x_span * 0.10   # 좌 10% 여백
+        _roi_hi        = _bead_x_hi_pct - _x_span * 0.10   # 우 10% 여백
+
+        _valid_idxs = [i for i, p in enumerate(profile)
+                       if _roi_lo < p["x_pct"] < _roi_hi]
+        if len(_valid_idxs) < 2:
+            _valid_idxs = list(range(len(arr)))  # ROI 내 점 부족 시 전체 사용
+
+        _sub_arr  = arr[_valid_idxs[0]:_valid_idxs[-1] + 1]
+        _off      = _valid_idxs[0]
+        worst_idx = int(np.argmax(np.abs(_sub_arr))) + _off
+        max_idx   = int(np.argmax(_sub_arr)) + _off
+        min_idx   = int(np.argmin(_sub_arr)) + _off
+        n_pts     = len(arr)
+        if max_idx == min_idx and len(_valid_idxs) > 1:
+            max_idx = _valid_idxs[0]
+            min_idx = _valid_idxs[-1]
 
         bead_y_pct = round(bead_center_y / h_img * 100, 2)
 
