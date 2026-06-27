@@ -525,8 +525,9 @@ export function registerFieldRoutes(app: Express): void {
         formData.append("language",              "ko");
         formData.append("analysis_mode",         "quick");
         formData.append("is_fillet",             "false");
-        formData.append("has_laser",             "false");
-        formData.append("laser_angle_deg",       "90");
+        // 현장 모드: 격자 레이저 분석 활성화, 45° 투사각 기준 (tan45=1.0 → 버그 없음)
+        formData.append("has_laser",             "true");
+        formData.append("laser_angle_deg",       "45");
         formData.append("shooting_angle_deg",    "90");
 
         const faUrl = `${FASTAPI_BASE}/analyze-welding`;

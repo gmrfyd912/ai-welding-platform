@@ -306,7 +306,10 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
 
         n_segments = 10
         x_range = max(bead_x_max - bead_x_min, 1)
-        tan_angle = max(math.tan(math.radians(laser_angle_deg)), 1e-9)
+        # tan(≥85°) → 사실상 무한대 → height_mm ≈ 0 버그 방지
+        # DOE 레이저는 보통 30°~60° 각도로 투사되므로 85° 이상은 물리적으로 무의미
+        effective_laser_deg = min(laser_angle_deg, 80.0) if laser_angle_deg >= 85.0 else laser_angle_deg
+        tan_angle = max(math.tan(math.radians(effective_laser_deg)), 1e-9)
         sin_shooting = max(math.sin(math.radians(shooting_angle_deg)), 1e-9)
 
         # 비드 중앙 y에 대한 예상 격자선 y (평탄면 기준 보간)
@@ -394,7 +397,12 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             })
 
         worst_idx = int(np.argmax(np.abs(arr)))
-        worst_pt = profile[worst_idx] if worst_idx < len(profile) else None
+        max_idx   = int(np.argmax(arr))
+        min_idx   = int(np.argmin(arr))
+        worst_pt  = profile[worst_idx] if worst_idx < len(profile) else None
+        max_pt    = profile[max_idx]   if max_idx   < len(profile) else None
+        min_pt    = profile[min_idx]   if min_idx   < len(profile) else None
+        bead_y_pct = round(bead_center_y / h_img * 100, 2)
 
         return {
             "status": "success",
@@ -409,11 +417,23 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             "gridLines": grid_lines_vis,
             "worstPoint": {
                 "x_pct": worst_pt["x_pct"],
-                "y_pct": round(bead_center_y / h_img * 100, 2),
+                "y_pct": bead_y_pct,
                 "height_mm": heights_mm[worst_idx],
             } if worst_pt else None,
+            # 최대/최소 높이 발생 좌표 (히트맵 마커용)
+            "maxPoint": {
+                "x_pct": max_pt["x_pct"],
+                "y_pct": bead_y_pct,
+                "height_mm": max_h,
+            } if max_pt else None,
+            "minPoint": {
+                "x_pct": min_pt["x_pct"],
+                "y_pct": bead_y_pct,
+                "height_mm": min_h,
+            } if min_pt else None,
             "message": (f"격자 간격 {laser_grid_spacing_mm}mm | "
-                        f"수평선 {len(h_lines)}개 검출"),
+                        f"수평선 {len(h_lines)}개 검출 | "
+                        f"유효각도 {effective_laser_deg}°"),
         }
 
     except Exception as e:

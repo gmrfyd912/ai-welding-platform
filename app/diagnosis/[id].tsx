@@ -772,6 +772,23 @@ export default function DiagnosisScreen() {
     });
   }, [imageRenderedBounds, heatmapContainerW, currentPhotoAnalysis]);
 
+  // 레이저 최대/최소 높이 좌표 → SVG 픽셀 좌표 변환
+  const laserHeightMarkers = useMemo(() => {
+    const la = result?.laserAnalysis;
+    if (!imageRenderedBounds || !la || la.status !== "success") return null;
+    const { imgW, imgH, offsetX, offsetY } = imageRenderedBounds;
+    const toPx = (pt: { x_pct: number; y_pct: number }) => ({
+      x: offsetX + (pt.x_pct / 100) * imgW,
+      y: offsetY + (pt.y_pct / 100) * imgH,
+    });
+    return {
+      max: la.maxPoint ? toPx(la.maxPoint) : null,
+      min: la.minPoint ? toPx(la.minPoint) : null,
+      maxH: la.beadHeightMax,
+      minH: la.beadHeightMin,
+    };
+  }, [imageRenderedBounds, result?.laserAnalysis]);
+
   const rank = useMemo(() => {
     if (!result) return 1;
     const userIds = Array.from(new Set(allResults.map((r) => r.userId)));
@@ -1647,6 +1664,76 @@ export default function DiagnosisScreen() {
                             </Text>
                           </View>
                         ))}
+                        {/* 레이저 최대/최소 높이 마커 */}
+                        {laserHeightMarkers && imgRenderedSize && (
+                          <Svg
+                            width={imgRenderedSize.width}
+                            height={imgRenderedSize.height}
+                            style={{ position: "absolute", top: 0, left: 0 }}
+                            pointerEvents="none"
+                          >
+                            {laserHeightMarkers.max && (
+                              <>
+                                {/* 최대 높이 마커 — 빨간 원 + ▲ */}
+                                <Circle
+                                  cx={laserHeightMarkers.max.x}
+                                  cy={laserHeightMarkers.max.y}
+                                  r={11}
+                                  fill="rgba(239,68,68,0.88)"
+                                  stroke="#fff"
+                                  strokeWidth="1.5"
+                                />
+                                <SvgText
+                                  x={laserHeightMarkers.max.x}
+                                  y={laserHeightMarkers.max.y + 5}
+                                  fontSize="12"
+                                  fontWeight="bold"
+                                  fill="#fff"
+                                  textAnchor="middle"
+                                >▲</SvgText>
+                                <SvgText
+                                  x={laserHeightMarkers.max.x + 15}
+                                  y={laserHeightMarkers.max.y - 5}
+                                  fontSize="11"
+                                  fontWeight="bold"
+                                  fill="#FCA5A5"
+                                  stroke="#000"
+                                  strokeWidth="0.4"
+                                >{`Max ${laserHeightMarkers.maxH.toFixed(2)}mm`}</SvgText>
+                              </>
+                            )}
+                            {laserHeightMarkers.min && (
+                              <>
+                                {/* 최소 높이 마커 — 파란 원 + ▼ */}
+                                <Circle
+                                  cx={laserHeightMarkers.min.x}
+                                  cy={laserHeightMarkers.min.y}
+                                  r={11}
+                                  fill="rgba(59,130,246,0.88)"
+                                  stroke="#fff"
+                                  strokeWidth="1.5"
+                                />
+                                <SvgText
+                                  x={laserHeightMarkers.min.x}
+                                  y={laserHeightMarkers.min.y + 5}
+                                  fontSize="12"
+                                  fontWeight="bold"
+                                  fill="#fff"
+                                  textAnchor="middle"
+                                >▼</SvgText>
+                                <SvgText
+                                  x={laserHeightMarkers.min.x + 15}
+                                  y={laserHeightMarkers.min.y + 15}
+                                  fontSize="11"
+                                  fontWeight="bold"
+                                  fill="#93C5FD"
+                                  stroke="#000"
+                                  strokeWidth="0.4"
+                                >{`Min ${laserHeightMarkers.minH.toFixed(2)}mm`}</SvgText>
+                              </>
+                            )}
+                          </Svg>
+                        )}
                         {defectMarkers.length === 0 && imgRenderedSize !== null && (
                           currentPhotoAnalysis.defects?.some((d: any) => d.detected) ? (
                             <View style={styles.heatmapNoDefect}>

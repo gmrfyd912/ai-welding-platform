@@ -79,7 +79,9 @@ async function callFastApiAnalyze(params: {
   // 필릿·레이저 파라미터 — FastAPI Form 기본값(false/45)이 있으나 명시 전달
   formData.append("is_fillet",          params.isFillet  ? "true" : "false");
   formData.append("has_laser",          params.hasLaser  ? "true" : "false");
-  formData.append("laser_angle_deg",    params.laserAngleDeg    ?? "90");
+  // 기본 45°: tan(45°)=1.0 → height_mm = deformation_px / ppm (직관적 공식)
+  // 90° 전달 시 tan(90°)≈∞ → height≈0 버그 방지 (Python 엔진에서도 clamp 처리됨)
+  formData.append("laser_angle_deg",    params.laserAngleDeg    ?? "45");
   formData.append("shooting_angle_deg", params.shootingAngleDeg ?? "90");
 
   const resp = await fetchWithTimeout(

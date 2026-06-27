@@ -160,6 +160,9 @@ export interface WeldingResult {
     laserGridSpacingMm: number;
     profile: Array<{ x_pct: number; height_mm: number }>;
     worstPoint?: { x_pct: number; y_pct: number; height_mm: number };
+    // 최대/최소 높이 발생 좌표 (히트맵 마커 렌더링용)
+    maxPoint?: { x_pct: number; y_pct: number; height_mm: number } | null;
+    minPoint?: { x_pct: number; y_pct: number; height_mm: number } | null;
     message: string;
     // 교차 검증 융합 (fuse_and_validate)
     is_cross_validated?: boolean;
