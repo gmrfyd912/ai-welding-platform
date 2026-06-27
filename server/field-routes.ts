@@ -525,10 +525,13 @@ export function registerFieldRoutes(app: Express): void {
         formData.append("language",              "ko");
         formData.append("analysis_mode",         "quick");
         formData.append("is_fillet",             "false");
-        // 현장 모드: 격자 레이저 분석 활성화, 45° 투사각 기준 (tan45=1.0 → 버그 없음)
+        // 현장 SOP 표준값 — UI 입력 없이 자동 고정:
+        //   has_laser=true        : 격자 레이저 분석 항상 활성화
+        //   laser_angle_deg=45    : DOE 레이저 투사 각도 (45° 고정, tan45=1.0)
+        //   shooting_angle_deg=45 : 카메라 앙각 폴백 (ArUco 마커가 있으면 동적 추정으로 자동 교체됨)
         formData.append("has_laser",             "true");
         formData.append("laser_angle_deg",       "45");
-        formData.append("shooting_angle_deg",    "90");
+        formData.append("shooting_angle_deg",    "45");
 
         const faUrl = `${FASTAPI_BASE}/analyze-welding`;
         console.log(`[field/analysis] FastAPI 호출: POST ${faUrl} | 파일: ${file.size}B | 모드: quick`);
