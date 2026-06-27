@@ -695,7 +695,7 @@ async def analyze_welding_full(
         has_laser=has_laser.lower() == "true",
         laser_angle_deg=float(laser_angle_deg) if laser_angle_deg else 45.0,
         shooting_angle_deg=float(shooting_angle_deg) if shooting_angle_deg else 90.0,
-        image_bytes=image_bytes_raw,
+        image_bytes=image_bytes,  # ArUco 호모그래피 보정 이미지 (원근 왜곡 제거 완료)
     )
 
     fillet_result = calculate_fillet_analysis(vision_data, vision_data.get("ppm", 1), is_fillet_bool)
