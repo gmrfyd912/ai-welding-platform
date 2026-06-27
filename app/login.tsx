@@ -101,7 +101,7 @@ export default function LoginScreen() {
         <View style={styles.logoSection}>
           <View style={styles.logoClip}>
             <Image
-              source={require("@/assets/images/_weldinglogo_icon.jpg")}
+              source={require("@/assets/images/weldinglogo_icon.jpg")}
               style={styles.mainLogo}
               resizeMode="cover"
             />
