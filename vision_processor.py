@@ -216,6 +216,7 @@ def fuse_and_validate(
 def analyze_laser_grid(image_bytes: bytes, ppm: float,
                        laser_angle_deg: float = 45.0,
                        shooting_angle_deg: float = 90.0,
+                       shooting_angle_est_deg: float = None,
                        bead_polygon_pct: list = None) -> dict:
     """
     DOE 격자 레이저 분석으로 비드 높이/오목볼록도 측정.
@@ -343,9 +344,18 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         laser_grid_spacing_mm = round(ref_spacing_px / ppm_used, 2)
 
         # ── [5단계] 각도 상수 ──────────────────────────────────────────────────
+        # 촬영 각도: ArUco 마커 변형비 추정값이 30~88° 범위이면 우선 사용, 아니면 전달값
+        if shooting_angle_est_deg is not None and 30.0 <= shooting_angle_est_deg <= 88.0:
+            shooting_angle_used = shooting_angle_est_deg
+            shooting_angle_src  = "aruco_est"
+        else:
+            shooting_angle_used = shooting_angle_deg
+            shooting_angle_src  = "param"
         effective_laser_deg = min(laser_angle_deg, 80.0) if laser_angle_deg >= 85.0 else laser_angle_deg
         tan_angle    = max(math.tan(math.radians(effective_laser_deg)), 1e-9)
-        sin_shooting = max(math.sin(math.radians(shooting_angle_deg)), 1e-9)
+        sin_shooting = max(math.sin(math.radians(shooting_angle_used)), 1e-9)
+        print(f"[LaserGrid] 레이저각={effective_laser_deg:.1f}° | 촬영각={shooting_angle_used:.1f}°({shooting_angle_src})"
+              f" | ppm={ppm_used:.2f}({ppm_source})")
 
         max_physical_h_mm = 10.0
         max_deform_px = max_physical_h_mm * ppm_used * tan_angle * sin_shooting
@@ -412,6 +422,23 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             _bl = _baseline_y(_xp * w_img / 100)
             _raw_h = round(_dp / sin_shooting / ppm_used / tan_angle, 2) if (ppm_used > 0 and tan_angle > 0) else 0
             print(f"  x={_xp:.1f}% | actual_y={_ay:.0f} | baseline_y={_bl:.0f} | deform={_dp:.1f}px | 원시h={_raw_h}mm")
+
+        # ── debug_metrics: 최대 변위 구간의 핵심 4변수 추출 ─────────────────────
+        _dbg_idx = int(np.argmax(np.abs([p[1] for p in profile_raw])))
+        _dbg_xp, _dbg_dp, _dbg_ay = profile_raw[_dbg_idx]
+        _dbg_bl = _baseline_y(_dbg_xp * w_img / 100)
+        debug_metrics = {
+            "deform_px":          round(_dbg_dp, 1),
+            "baseline_y":         round(_dbg_bl, 1),
+            "actual_y":           round(_dbg_ay, 1),
+            "ppm":                round(ppm_used, 2),
+            "laser_angle_deg":    round(effective_laser_deg, 1),
+            "shooting_angle_deg": round(shooting_angle_used, 1),
+            "shooting_src":       shooting_angle_src,
+            "toe_y":              round(_toe_y, 1) if use_toe_baseline else None,
+            "x_pct":              round(_dbg_xp, 1),
+            "image_size":         f"{w_img}×{h_img}",
+        }
 
         # ── [7단계] 부호 합의 (Toe 기준선 미사용 시에만) ─────────────────────
         # Toe 기준선 사용 시: 볼록 비드는 수학적으로 항상 양수 → 반전 불필요.
@@ -522,6 +549,13 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             else:
                 clean = img_s.copy()
 
+            # [임시 디버그] 실제 인페인팅 결과물을 로컬 디스크에 저장 → 실제 작동 여부 증명
+            try:
+                cv2.imwrite("debug_clean_image.jpg", clean)
+                print(f"[LaserGrid] 디버그 이미지 저장: debug_clean_image.jpg ({w_s}×{h_s}px)")
+            except Exception as _de:
+                print(f"[LaserGrid] 디버그 이미지 저장 실패: {_de}")
+
             ok2, buf2 = cv2.imencode(".jpg", clean, [cv2.IMWRITE_JPEG_QUALITY, 70])
             if ok2:
                 clean_image_b64 = _b64.b64encode(bytes(buf2.tobytes())).decode()
@@ -550,6 +584,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             "ppmSource":  ppm_source,
             "toeBaseline": use_toe_baseline,
             "clean_image_base64": clean_image_b64,
+            "debug_metrics": debug_metrics,
             "message": (
                 f"격자 간격 {laser_grid_spacing_mm}mm | "
                 f"수평선 {len(h_lines)}개 검출 | "
@@ -569,6 +604,7 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
                             has_laser: bool = False,
                             laser_angle_deg: float = 45.0,
                             shooting_angle_deg: float = 90.0,
+                            shooting_angle_est_deg: float = None,
                             image_bytes: bytes = None):
     """
     비드 폭 / 직진도 분석.
@@ -973,10 +1009,12 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
             ppm=ppm,
             laser_angle_deg=laser_angle_deg,
             shooting_angle_deg=shooting_angle_deg,
+            shooting_angle_est_deg=shooting_angle_est_deg,
             bead_polygon_pct=bead_polygon_pct,
         )
-        # 레이저 제거 이미지를 별도 추출 후 laser_result에서 제거 (직렬화 크기 절약)
+        # 레이저 제거 이미지 + 디버그 메트릭스를 laser_result에서 분리 (직렬화 크기 절약)
         clean_image_base64 = laser_result.pop("clean_image_base64", "")
+        debug_metrics      = laser_result.pop("debug_metrics", {})
         print(f"[Vision:laser] status={laser_result.get('status')} | clean_image_base64 길이={len(clean_image_base64)}")
 
         # 교차 검증 융합: 레이저 이상 구간을 강건 회귀 추정값으로 보정
@@ -1028,4 +1066,6 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
         "bead_profile_2d": bead_profile_2d,
         # 히트맵 배경용 레이저 제거 이미지 (base64 JPEG). DB에는 저장하지 않음.
         "clean_image_base64": clean_image_base64,
+        # 디버그 메트릭스: UI에 노출하여 높이 계산 변수 추적
+        "debug_metrics": debug_metrics,
     }

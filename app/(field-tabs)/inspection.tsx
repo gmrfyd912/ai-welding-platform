@@ -214,6 +214,7 @@ export default function InspectionScreen() {
         filletAnalysis:   fa.filletAnalysis ?? null,
         laserAnalysis:    fa.laserAnalysis ?? null,
         cleanImageBase64: fa.cleanImageBase64 ?? "",
+        debugMetrics:     fa.debugMetrics ?? null,
       };
 
       // ⑥ 폼 초기화 후 진단 리포트 화면으로 이동

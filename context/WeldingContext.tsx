@@ -151,6 +151,19 @@ export interface WeldingResult {
   isFillet?: boolean;
   /** 레이저 제거 이미지 base64. 분석 직후만 유효 (DB 비저장). */
   cleanImageBase64?: string;
+  /** 레이저 높이 계산 핵심 변수 디버그용. 분석 직후만 유효 (DB 비저장). */
+  debugMetrics?: {
+    deform_px: number;
+    baseline_y: number;
+    actual_y: number;
+    ppm: number;
+    laser_angle_deg: number;
+    shooting_angle_deg: number;
+    shooting_src: string;
+    toe_y: number | null;
+    x_pct: number;
+    image_size: string;
+  } | null;
   laserAnalysis?: {
     status: string;
     beadHeightMax: number;

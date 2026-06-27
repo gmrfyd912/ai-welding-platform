@@ -118,6 +118,19 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
             info["reason"] = "marker_too_small"
             return image_bytes, info
 
+        # ── 촬영 앵글 동적 추정 ────────────────────────────────────────────────
+        # 마커는 30mm 정사각형. 카메라 앙각 θ에서 한 방향이 sin(θ)로 압축.
+        # side_lens: [상, 우, 하, 좌] → 수평(0,2): top+bottom, 수직(1,3): right+left
+        horiz_avg = (side_lens[0] + side_lens[2]) / 2.0
+        vert_avg  = (side_lens[1] + side_lens[3]) / 2.0
+        if horiz_avg > 5.0 and vert_avg > 5.0:
+            compression = min(horiz_avg, vert_avg) / max(horiz_avg, vert_avg)
+            compression = max(0.10, min(1.0, compression))
+            shooting_est = round(float(np.degrees(np.arcsin(compression))), 1)
+        else:
+            shooting_est = 90.0
+        info["shooting_angle_est_deg"] = shooting_est
+
         # 목표: (cx,cy) 중심의 변 길이 L 정사각형 (축 정렬)
         h = L / 2.0
         target = np.array(

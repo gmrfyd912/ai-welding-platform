@@ -1324,21 +1324,30 @@ export default function DiagnosisScreen() {
                     const la = result.laserAnalysis!;
                     const hDiff = la.beadHeightMax - la.beadHeightMin;
                     return (
-                      <View style={{ flexDirection: "row", gap: 8 }}>
-                        <MeasureCard
-                          icon="arrow-collapse-up"
-                          label="레이저 최대높이"
-                          value={`${la.beadHeightMax.toFixed(2)}mm`}
-                          status="info"
-                        />
-                        <MeasureCard
-                          icon="arrow-collapse-down"
-                          label="레이저 최소높이"
-                          value={`${la.beadHeightMin.toFixed(2)}mm`}
-                          sub={`편차 ${hDiff.toFixed(2)}mm`}
-                          status={hDiff <= 1.0 ? "good" : hDiff <= 2.0 ? "warn" : "bad"}
-                        />
-                      </View>
+                      <>
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <MeasureCard
+                            icon="arrow-collapse-up"
+                            label="레이저 최대높이"
+                            value={`${la.beadHeightMax.toFixed(2)}mm`}
+                            status="info"
+                          />
+                          <MeasureCard
+                            icon="arrow-collapse-down"
+                            label="레이저 최소높이"
+                            value={`${la.beadHeightMin.toFixed(2)}mm`}
+                            sub={`편차 ${hDiff.toFixed(2)}mm`}
+                            status={hDiff <= 1.0 ? "good" : hDiff <= 2.0 ? "warn" : "bad"}
+                          />
+                        </View>
+                        {/* 디버그 메트릭스: 높이 계산 핵심 변수 강제 노출 */}
+                        {result.debugMetrics && (
+                          <Text style={{ color: "#999", fontFamily: "Inter_400Regular", fontSize: 10, marginTop: 6, lineHeight: 15 }}>
+                            {`Debug: deform=${result.debugMetrics.deform_px}px | ppm=${result.debugMetrics.ppm} | base_y=${result.debugMetrics.baseline_y} | act_y=${result.debugMetrics.actual_y}\n` +
+                             `laser=${result.debugMetrics.laser_angle_deg}° | shoot=${result.debugMetrics.shooting_angle_deg}°(${result.debugMetrics.shooting_src}) | toe_y=${result.debugMetrics.toe_y ?? "—"} | img=${result.debugMetrics.image_size}`}
+                          </Text>
+                        )}
+                      </>
                     );
                   })()}
                 </>
@@ -1575,6 +1584,24 @@ export default function DiagnosisScreen() {
                         if (width > 0 && height > 0) setImgRenderedSize({ width, height });
                       }}
                     />
+                    {/* 히트맵 배경 소스 워터마크: CLEAN_APPLIED / ORIGINAL_FALLBACK */}
+                    <View style={{ position: "absolute", bottom: 6, right: 6 }} pointerEvents="none">
+                      <Text style={{
+                        color: "rgba(255,255,255,0.9)",
+                        fontSize: 9,
+                        fontFamily: "Inter_700Bold",
+                        backgroundColor: selectedPhotoView === "front" && result.cleanImageBase64 && result.cleanImageBase64.length > 100
+                          ? "rgba(34,197,94,0.7)"
+                          : "rgba(239,68,68,0.7)",
+                        paddingHorizontal: 5,
+                        paddingVertical: 2,
+                        borderRadius: 4,
+                      }}>
+                        {selectedPhotoView === "front" && result.cleanImageBase64 && result.cleanImageBase64.length > 100
+                          ? "CLEAN_APPLIED"
+                          : "ORIGINAL_FALLBACK"}
+                      </Text>
+                    </View>
                     {showHeatmap && currentPhotoAnalysis && imgRenderedSize && imgNaturalSize && (
                       <View
                         style={{

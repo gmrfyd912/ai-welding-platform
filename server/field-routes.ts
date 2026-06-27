@@ -626,6 +626,7 @@ export function registerFieldRoutes(app: Express): void {
             weld_type:        detectedWeldType,
             // 레이저 제거 이미지: DB 비저장, 분석 직후 히트맵 배경으로만 사용
             cleanImageBase64: (fa.visionMeasurement as any)?.clean_image_base64 ?? "",
+            debugMetrics:     (fa.visionMeasurement as any)?.debug_metrics ?? null,
             // 진단: full_analysis 반환 직전 로그
             ...(console.log(`[field/cleanImage] full_analysis 반환: cleanImageBase64 길이=${((fa.visionMeasurement as any)?.clean_image_base64 ?? "").length}`), {}),
           },

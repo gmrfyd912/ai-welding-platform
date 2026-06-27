@@ -689,6 +689,10 @@ async def analyze_welding_full(
     # Roboflow 가 Reference_Marker 못 잡았으면 OpenCV ArUco 검출값으로 폴백 주입
     front_robo  = _inject_marker_fallback(front_robo, front_aruco, "front")
     front_preds = front_robo.get("predictions", [])
+    # ArUco 마커 변형비에서 추정한 카메라 앙각 (30~88° 범위일 때만 유효)
+    aruco_shooting_est = front_aruco.get("shooting_angle_est_deg")
+    if aruco_shooting_est:
+        print(f"[ArUco:front] 촬영 앵글 추정={aruco_shooting_est:.1f}° (마커 변형비 기반)")
     vision_data = analyze_bead_dimensions(
         front_preds,
         is_pipe=is_pipe,
@@ -696,6 +700,7 @@ async def analyze_welding_full(
         has_laser=has_laser.lower() == "true",
         laser_angle_deg=float(laser_angle_deg) if laser_angle_deg else 45.0,
         shooting_angle_deg=float(shooting_angle_deg) if shooting_angle_deg else 90.0,
+        shooting_angle_est_deg=aruco_shooting_est,
         image_bytes=image_bytes,  # ArUco 호모그래피 보정 이미지 (원근 왜곡 제거 완료)
     )
 
@@ -1048,6 +1053,7 @@ async def analyze_welding_full(
             "bead_profile_2d":       vision_data.get("bead_profile_2d"),
             # 히트맵 배경용 레이저 제거 이미지 (base64). DB 비저장 — 분석 직후 프론트에만 전달.
             "clean_image_base64":    vision_data.get("clean_image_base64", ""),
+            "debug_metrics":         vision_data.get("debug_metrics", {}),
         },
         # welding_calculator 원시 출력
         "weldScore": weld_data,
