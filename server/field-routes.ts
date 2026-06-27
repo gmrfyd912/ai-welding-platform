@@ -530,7 +530,7 @@ export function registerFieldRoutes(app: Express): void {
         //   laser_angle_deg=45    : DOE 레이저 투사 각도 (45° 고정, tan45=1.0)
         //   shooting_angle_deg=45 : 카메라 앙각 폴백 (ArUco 마커가 있으면 동적 추정으로 자동 교체됨)
         formData.append("has_laser",             "true");
-        formData.append("laser_angle_deg",       "45");
+        formData.append("laser_angle_deg",       "90");
         formData.append("shooting_angle_deg",    "45");
 
         const faUrl = `${FASTAPI_BASE}/analyze-welding`;

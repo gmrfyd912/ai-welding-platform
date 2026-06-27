@@ -352,10 +352,12 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             shooting_angle_used = shooting_angle_deg
             shooting_angle_src  = "param"
         effective_laser_deg = min(laser_angle_deg, 80.0) if laser_angle_deg >= 85.0 else laser_angle_deg
-        tan_angle    = max(math.tan(math.radians(effective_laser_deg)), 1e-9)
+        # 수직 레이저(90°)에서는 tan(laser_angle)이 무한대 → 공식에서 제외.
+        # 카메라 앙각(shooting_angle_used)으로 변위를 역산: h = deform / (tan(θ_cam) * ppm)
+        tan_angle    = max(math.tan(math.radians(shooting_angle_used)), 1e-9)
         sin_shooting = max(math.sin(math.radians(shooting_angle_used)), 1e-9)
-        print(f"[LaserGrid] 레이저각={effective_laser_deg:.1f}° | 촬영각={shooting_angle_used:.1f}°({shooting_angle_src})"
-              f" | ppm={ppm_used:.2f}({ppm_source})")
+        print(f"[LaserGrid] 레이저각={effective_laser_deg:.1f}°(수식미사용) | 촬영각={shooting_angle_used:.1f}°({shooting_angle_src})"
+              f" | tan_cam={tan_angle:.4f} | ppm={ppm_used:.2f}({ppm_source})")
 
         max_physical_h_mm = 10.0
         max_deform_px = max_physical_h_mm * ppm_used * tan_angle * sin_shooting
