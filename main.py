@@ -1,6 +1,7 @@
 import os
 import math
 import base64
+import asyncio
 import httpx
 import cv2
 import numpy as np
@@ -774,44 +775,8 @@ async def analyze_welding_full(
         "plate_thickness": plate_thickness,
         "is_fillet":       is_fillet_bool,  # LLM 조인트별 프롬프트 분기용
     }
-    expert_advice = {}
-    if analysis_mode != "quick":
-        try:
-            # 업로드된 모든 사진을 GPT-4o 비전에 함께 전달 — 정면 high, 보조 low
-            gpt_images = [{"label": "정면", "base64": image_base64}]
-            if has_side_photo and side_vision_data is not None:
-                gpt_images.append({
-                    "label": "측면",
-                    "base64": base64.b64encode(side_bytes).decode(),
-                })
-            if back_vision_data is not None:
-                gpt_images.append({
-                    "label": "이면",
-                    "base64": base64.b64encode(back_bytes).decode(),
-                })
-
-            # 측면 사진이 업로드됐어도 측정에 실패했으면 GPT 가 높이 분석을 못 하도록
-            # 실제 측정 성공 여부로 플래그 전달 (업로드 여부 != 측정 성공)
-            has_side_measurement = side_vision_data is not None
-            expert_advice = await get_expert_advice(
-                gpt_images, weld_data,
-                user_history=user_history,
-                context_meta=context_meta,
-                admin_feedback=admin_feedback,
-                language_name=language_name,
-                has_side_photo=has_side_measurement,
-                per_photo_bead=weld_data.get("per_photo_bead"),
-                fillet_data=fillet_result,
-                measurement_ground_truth=measurement_context,
-            )
-            rep_len = len(str(expert_advice.get("comprehensiveReport", "")))
-            n_imp   = len(expert_advice.get("improvements", []) or [])
-            print(f"[GPT Advisor] 리포트 {rep_len}자 / 개선책 {n_imp}개 / "
-                  f"이력 {'있음' if user_history else '없음'} / 사진 {len(gpt_images)}장 종합")
-        except Exception as e:
-            print(f"[GPT Advisor] 오류: {e} - 측정값 기반 폴백 리포트로 대체")
-
-    # ── 6. 명장 마크다운 리포트 (vision 측정값 기반) ────────────────
+    # ── 5+6. GPT 어드바이저 + 명장 리포트 병렬 실행 ─────────────────
+    # 두 LLM 호출이 서로 독립적이므로 asyncio.gather로 동시 실행 → 대기 시간 절반 단축
     raw_defects_for_report = [
         {"type": d["class"], "size_mm": d.get("size_mm", 0.0)}
         for d in vision_data.get("defects_info", [])
@@ -822,17 +787,59 @@ async def analyze_welding_full(
         "width_variation_mm":    weld_data["width_variance"],
         "straightness_error_mm": weld_data["straightness_variance"],
     }
+    expert_advice = {}
     pipeline_report = None
     if analysis_mode != "quick":
-        try:
-            pipeline_report = await generate_expert_report(
-                process,
-                {"defects": raw_defects_for_report, "bead_quality": bead_quality_for_report},
-                ai_model, is_pipe,
-                language_name=language_name,
-            )
-        except Exception as e:
-            print(f"[명장 리포트] 오류: {e}")
+        gpt_images = [{"label": "정면", "base64": image_base64}]
+        if has_side_photo and side_vision_data is not None:
+            gpt_images.append({
+                "label": "측면",
+                "base64": base64.b64encode(side_bytes).decode(),
+            })
+        if back_vision_data is not None:
+            gpt_images.append({
+                "label": "이면",
+                "base64": base64.b64encode(back_bytes).decode(),
+            })
+        has_side_measurement = side_vision_data is not None
+
+        async def _run_expert():
+            try:
+                r = await get_expert_advice(
+                    gpt_images, weld_data,
+                    user_history=user_history,
+                    context_meta=context_meta,
+                    admin_feedback=admin_feedback,
+                    language_name=language_name,
+                    has_side_photo=has_side_measurement,
+                    per_photo_bead=weld_data.get("per_photo_bead"),
+                    fillet_data=fillet_result,
+                    measurement_ground_truth=measurement_context,
+                )
+                rep_len = len(str(r.get("comprehensiveReport", "")))
+                n_imp   = len(r.get("improvements", []) or [])
+                print(f"[GPT Advisor] 리포트 {rep_len}자 / 개선책 {n_imp}개 / "
+                      f"이력 {'있음' if user_history else '없음'} / 사진 {len(gpt_images)}장 종합")
+                return r
+            except Exception as e:
+                print(f"[GPT Advisor] 오류: {e} - 측정값 기반 폴백 리포트로 대체")
+                return {}
+
+        async def _run_report():
+            try:
+                return await generate_expert_report(
+                    process,
+                    {"defects": raw_defects_for_report, "bead_quality": bead_quality_for_report},
+                    ai_model, is_pipe,
+                    language_name=language_name,
+                )
+            except Exception as e:
+                print(f"[명장 리포트] 오류: {e}")
+                return None
+
+        expert_advice, pipeline_report = await asyncio.gather(
+            _run_expert(), _run_report()
+        )
 
     # ── 7. beadAnalysis 구조 — 종합(평균) + 사진별 ──────────────────
     # 종합: 모든 사진 비드 점수의 평균 (welding_calculator 가 이미 평균 계산)

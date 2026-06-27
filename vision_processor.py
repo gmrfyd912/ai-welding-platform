@@ -321,20 +321,24 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             ref_spacing_px = 20.0
 
         # ── [4b단계] PPM 유효성 검사 및 폴백 ──────────────────────────────────
+        # 물리적 유효 범위: 15~300 px/mm (일반 촬영 거리에서 ArUco 30mm → 보통 20~60)
+        # 이전 버그: ref_spacing_px / 5.0 → 격자 피치 5mm 오가정 → ppm 2배 과소평가 →
+        #   h_mm = deform / ppm 이 2배 폭발. 실제 DOE 격자는 보통 10mm 피치.
         ppm_used = float(ppm) if (ppm and ppm > 0) else 0.0
         ppm_source = "aruco"
-        if ppm_used < 8.0 or ppm_used > 300.0:
+        if ppm_used < 15.0 or ppm_used > 300.0:
             if ref_spacing_px >= 15.0:
-                estimated_ppm = ref_spacing_px / 5.0  # DOE 5mm 격자 피치 가정
-                if 8.0 <= estimated_ppm <= 300.0:
+                estimated_ppm = ref_spacing_px / 10.0  # DOE 10mm 격자 피치 가정
+                if 15.0 <= estimated_ppm <= 300.0:
                     ppm_used = estimated_ppm
-                    ppm_source = "grid_5mm_pitch"
+                    ppm_source = "grid_10mm_pitch"
                 else:
-                    ppm_used = 30.0
-                    ppm_source = "fallback_30px_mm"
+                    ppm_used = 25.0
+                    ppm_source = "fallback_25px_mm"
             else:
-                ppm_used = 30.0
-                ppm_source = "fallback_30px_mm"
+                ppm_used = 25.0
+                ppm_source = "fallback_25px_mm"
+        ppm_used = max(15.0, ppm_used)  # 최종 안전망: 15px/mm 미만은 물리적으로 비현실적
 
         laser_grid_spacing_mm = round(ref_spacing_px / ppm_used, 2)
 
@@ -425,10 +429,8 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         for (x_pct, deform_px, actual_y) in profile_raw:
             clamped = max(-max_deform_px, min(max_deform_px, deform_px))
             h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
-            # Toe 기준선 사용 시: 볼록 비드는 물리적으로 음수 불가 → 0 클램프
-            # 상단 이상값(뚜껑/반사 등) 방지: 현실적 최대 8mm 적용
             if use_toe_baseline:
-                h_mm = max(0.0, min(8.0, h_mm))
+                h_mm = max(0.0, h_mm)  # 볼록 비드: 음수 방지 (상한은 PPM 수식이 보장)
             heights_mm.append(h_mm)
             profile.append({
                 "x_pct":        x_pct,
@@ -500,16 +502,31 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             krnl     = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
             combined = cv2.dilate(combined, krnl, iterations=1)
 
-            if cv2.countNonZero(combined) > 30:
-                clean = cv2.inpaint(img, combined, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+            # ── 속도 최적화: 1024px 이하로 리사이즈 후 인페인팅 ─────────────────
+            # 고해상도 원본(예: 3000×4000)에서 INPAINT_TELEA는 20초+ 소요.
+            # 1024px로 축소하면 픽셀 수 약 1/9 → 1~2초 이내 처리.
+            INPAINT_MAX_W = 1024
+            scale = min(1.0, INPAINT_MAX_W / max(w_img, 1))
+            if scale < 1.0:
+                w_s = int(w_img * scale)
+                h_s = int(h_img * scale)
+                img_s  = cv2.resize(img,      (w_s, h_s), interpolation=cv2.INTER_AREA)
+                mask_s = cv2.resize(combined, (w_s, h_s), interpolation=cv2.INTER_NEAREST)
+                mask_s = cv2.dilate(mask_s, krnl, iterations=1)
             else:
-                clean = img.copy()
+                img_s, mask_s = img, combined
+                w_s, h_s = w_img, h_img
 
-            ok2, buf2 = cv2.imencode(".jpg", clean, [cv2.IMWRITE_JPEG_QUALITY, 82])
+            if cv2.countNonZero(mask_s) > 30:
+                clean = cv2.inpaint(img_s, mask_s, inpaintRadius=4, flags=cv2.INPAINT_TELEA)
+            else:
+                clean = img_s.copy()
+
+            ok2, buf2 = cv2.imencode(".jpg", clean, [cv2.IMWRITE_JPEG_QUALITY, 70])
             if ok2:
                 clean_image_b64 = _b64.b64encode(bytes(buf2.tobytes())).decode()
                 print(f"[LaserGrid] 레이저 제거 이미지 생성 완료: {len(clean_image_b64)}chars "
-                      f"(마스크픽셀={cv2.countNonZero(combined)})")
+                      f"({w_s}×{h_s}px, 마스크픽셀={cv2.countNonZero(mask_s)})")
             else:
                 print("[LaserGrid] 레이저 제거 이미지 인코딩 실패")
         except Exception as ex:
