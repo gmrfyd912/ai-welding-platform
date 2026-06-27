@@ -548,6 +548,9 @@ export function registerFieldRoutes(app: Express): void {
         }
 
         const fa = await faResp.json();
+        // 진단 로그: FastAPI 응답 수신 직후 clean_image_base64 길이 확인
+        const _cleanLen = ((fa.visionMeasurement as any)?.clean_image_base64 ?? "").length;
+        console.log(`[field/cleanImage] FastAPI 수신: visionMeasurement.clean_image_base64 길이=${_cleanLen}`);
 
         // ── 4. 결과 파싱 ────────────────────────────────────────────────────
         const finalStatus: "PASS" | "FAIL" =
@@ -623,6 +626,8 @@ export function registerFieldRoutes(app: Express): void {
             weld_type:        detectedWeldType,
             // 레이저 제거 이미지: DB 비저장, 분석 직후 히트맵 배경으로만 사용
             cleanImageBase64: (fa.visionMeasurement as any)?.clean_image_base64 ?? "",
+            // 진단: full_analysis 반환 직전 로그
+            ...(console.log(`[field/cleanImage] full_analysis 반환: cleanImageBase64 길이=${((fa.visionMeasurement as any)?.clean_image_base64 ?? "").length}`), {}),
           },
         });
       } catch (e: any) {

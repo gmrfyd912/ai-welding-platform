@@ -138,6 +138,8 @@ export default function InspectionScreen() {
 
       // ⑤ FastAPI full_analysis 에서 WeldingResult 구성
       const fa = (raw.full_analysis ?? {}) as Record<string, any>;
+      // 진단 로그: cleanImageBase64 프론트 수신 확인
+      console.log(`[inspection] cleanImageBase64 수신 길이=${(fa.cleanImageBase64 ?? "").length} | laserStatus=${fa.laserAnalysis?.status ?? "none"}`);
       const aiScore = typeof fa.aiScore === "number" ? fa.aiScore : Number(raw.ai_score ?? 0);
       const grade =
         aiScore >= 90 ? "S" :

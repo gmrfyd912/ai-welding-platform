@@ -277,42 +277,33 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
 
         bead_center_y = (bead_y_min + bead_y_max) / 2.0
 
-        # ── [3b단계] Toe 기준선 추출 (bead_polygon_pct 좌/우 끝점) ───────────
-        # Toe = 비드와 모재가 만나는 경계점. 이 두 점을 연결한 선이 Height=0 기준.
-        # 이미지 좌표계(Y↓): Toe는 폴리곤의 좌측 극단 / 우측 극단 점군의 중앙값.
+        # ── [3b단계] Toe 기준선 정의 ──────────────────────────────────────────
+        # Toe = 비드가 모재와 만나는 최하단 경계(Height=0 기준면).
+        # 이미지 좌표계(Y↓): 폴리곤의 최대 y값(= bead_y_max)이 Toe 레벨.
+        #
+        # ▲ 이전 버그: np.median(left_band의 y값) → 좌측 엣지 전체(위→아래)의
+        #   중간값이 기준선이 되어 비드 중간 높이를 기준으로 측정 →
+        #   폴리곤 상단부 Hough 선은 기준선 위(+), 하단부 선은 기준선 아래(-) →
+        #   음수 높이와 10mm 클램프 동시 발생
+        # ▼ 수정: bead_y_max(폴리곤 최하단 = Toe) 를 수평 기준선으로 사용.
+        #   볼록 비드의 Hough 선은 항상 이 선 위 → deform_px > 0 → 높이 항상 양수.
         use_toe_baseline = False
-        left_toe_x_px  = float(bead_x_min)
-        left_toe_y_px  = float(bead_y_max)
-        right_toe_x_px = float(bead_x_max)
-        right_toe_y_px = float(bead_y_max)
+        _toe_y = float(bead_y_max)  # 기준선 y (수평, 모든 x에서 동일)
 
         if bead_polygon_pct and len(bead_polygon_pct) >= 3:
-            poly_px = [(p["x_pct"] * w_img / 100.0, p["y_pct"] * h_img / 100.0)
-                       for p in bead_polygon_pct]
-            xs_poly    = [pt[0] for pt in poly_px]
-            x_poly_min = min(xs_poly)
-            x_poly_max = max(xs_poly)
-            band       = max((x_poly_max - x_poly_min) * 0.15, 8.0)  # 양 끝 15% 밴드
+            # bead_y_max는 [3단계]에서 이미 bead_polygon_pct 기반으로 계산됨
+            use_toe_baseline = True
 
-            left_band  = [pt for pt in poly_px if pt[0] <= x_poly_min + band]
-            right_band = [pt for pt in poly_px if pt[0] >= x_poly_max - band]
-
-            if left_band and right_band:
-                left_toe_x_px  = float(np.median([pt[0] for pt in left_band]))
-                left_toe_y_px  = float(np.median([pt[1] for pt in left_band]))
-                right_toe_x_px = float(np.median([pt[0] for pt in right_band]))
-                right_toe_y_px = float(np.median([pt[1] for pt in right_band]))
-                use_toe_baseline = True
-                print(f"[LaserGrid] Toe 기준선: L({left_toe_x_px:.0f},{left_toe_y_px:.0f})"
-                      f" → R({right_toe_x_px:.0f},{right_toe_y_px:.0f})")
+        # 진단 로그: 기준선 결정 근거 출력
+        print(f"[LaserGrid] 이미지 {w_img}×{h_img} | 폴리곤={'있음('+str(len(bead_polygon_pct))+'pts)' if bead_polygon_pct else '없음'}"
+              f" | bead=({bead_x_min}~{bead_x_max}, {bead_y_min}~{bead_y_max})"
+              f" | Toe기준선={'사용(y='+str(int(_toe_y))+')' if use_toe_baseline else '미사용(외삽폴백)'}")
 
         def _baseline_y(x_px: float) -> float:
-            """x 위치의 모재 표면 기준선 y (Toe-to-Toe 선형 보간)."""
-            if not use_toe_baseline or right_toe_x_px <= left_toe_x_px:
-                return _expected_center_y  # 폴백
-            t = max(0.0, min(1.0,
-                    (x_px - left_toe_x_px) / (right_toe_x_px - left_toe_x_px)))
-            return left_toe_y_px + t * (right_toe_y_px - left_toe_y_px)
+            """x 위치의 모재 표면 기준선 y."""
+            if use_toe_baseline:
+                return _toe_y  # 수평 기준선 (bead_y_max = Toe 레벨)
+            return _expected_center_y  # 폴백: 평탄면 외삽
 
         # ── [4단계] 기준 격자 간격 계산 (평탄면 기준) ─────────────────────────
         flat_ys = sorted([
@@ -411,6 +402,13 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         if not profile_raw:
             return {"status": "error", "message": "비드 위 격자 변형을 측정하지 못했습니다"}
 
+        # 진단 로그: 구간별 변위 값 출력
+        print(f"[LaserGrid] bead_h_lines={len(bead_h_lines)} | 프로파일 구간={len(profile_raw)}")
+        for _xp, _dp, _ay in profile_raw:
+            _bl = _baseline_y(_xp * w_img / 100)
+            _raw_h = round(_dp / sin_shooting / ppm_used / tan_angle, 2) if (ppm_used > 0 and tan_angle > 0) else 0
+            print(f"  x={_xp:.1f}% | actual_y={_ay:.0f} | baseline_y={_bl:.0f} | deform={_dp:.1f}px | 원시h={_raw_h}mm")
+
         # ── [7단계] 부호 합의 (Toe 기준선 미사용 시에만) ─────────────────────
         # Toe 기준선 사용 시: 볼록 비드는 수학적으로 항상 양수 → 반전 불필요.
         # 폴백(외삽 기준선) 사용 시: 음수 지배이면 전체 반전.
@@ -427,6 +425,10 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         for (x_pct, deform_px, actual_y) in profile_raw:
             clamped = max(-max_deform_px, min(max_deform_px, deform_px))
             h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
+            # Toe 기준선 사용 시: 볼록 비드는 물리적으로 음수 불가 → 0 클램프
+            # 상단 이상값(뚜껑/반사 등) 방지: 현실적 최대 8mm 적용
+            if use_toe_baseline:
+                h_mm = max(0.0, min(8.0, h_mm))
             heights_mm.append(h_mm)
             profile.append({
                 "x_pct":        x_pct,
@@ -506,6 +508,10 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             ok2, buf2 = cv2.imencode(".jpg", clean, [cv2.IMWRITE_JPEG_QUALITY, 82])
             if ok2:
                 clean_image_b64 = _b64.b64encode(bytes(buf2.tobytes())).decode()
+                print(f"[LaserGrid] 레이저 제거 이미지 생성 완료: {len(clean_image_b64)}chars "
+                      f"(마스크픽셀={cv2.countNonZero(combined)})")
+            else:
+                print("[LaserGrid] 레이저 제거 이미지 인코딩 실패")
         except Exception as ex:
             print(f"[LaserGrid] 레이저 제거 이미지 오류: {ex}")
 
@@ -954,6 +960,7 @@ def analyze_bead_dimensions(predictions, marker_real_size_mm=30.0, is_pipe=False
         )
         # 레이저 제거 이미지를 별도 추출 후 laser_result에서 제거 (직렬화 크기 절약)
         clean_image_base64 = laser_result.pop("clean_image_base64", "")
+        print(f"[Vision:laser] status={laser_result.get('status')} | clean_image_base64 길이={len(clean_image_base64)}")
 
         # 교차 검증 융합: 레이저 이상 구간을 강건 회귀 추정값으로 보정
         fusion = fuse_and_validate(laser_result, bead_profile_2d)

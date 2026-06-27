@@ -1047,4 +1047,7 @@ async def analyze_welding_full(
         # 필렛 분석 (is_fillet=true 일 때만 non-null)
         "filletAnalysis": fillet_result,
     }
+    clean_b64_len = len(vision_data.get("clean_image_base64", ""))
+    print(f"[FastAPI:response] clean_image_base64 길이={clean_b64_len} | "
+          f"laser_status={vision_data.get('laser_analysis', {}).get('status') if vision_data.get('laser_analysis') else 'none'}")
     return convert_numpy_types(result)
