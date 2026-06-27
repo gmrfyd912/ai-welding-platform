@@ -834,10 +834,23 @@ export default function DiagnosisScreen() {
       ? result.photos.back
       : result.photos?.front ?? result.photoUri;
 
+  // 히트맵 배경: 정면 뷰 + 레이저 제거 이미지가 있으면 클린 이미지 사용, 없으면 원본
+  const heatmapImageSource = useMemo(() => {
+    if (
+      selectedPhotoView === "front" &&
+      result.cleanImageBase64 &&
+      result.cleanImageBase64.length > 100
+    ) {
+      return { uri: `data:image/jpeg;base64,${result.cleanImageBase64}` };
+    }
+    return { uri: selectedPhotoUri };
+  }, [selectedPhotoView, result.cleanImageBase64, selectedPhotoUri]);
+
   useEffect(() => {
     if (!selectedPhotoUri) return;
     setImgNaturalSize(null);
     setImgRenderedSize(null);
+    // naturalSize는 원본 URI 기준 (cleanImage는 동일 해상도이므로 별도 getSize 불필요)
     Image.getSize(
       selectedPhotoUri,
       (w, h) => { if (w > 0 && h > 0) setImgNaturalSize({ width: w, height: h }); },
@@ -1554,7 +1567,7 @@ export default function DiagnosisScreen() {
                 <GestureDetector gesture={heatmapGesture}>
                   <Animated.View style={zoomAnimStyle}>
                     <ExpoImage
-                      source={{ uri: selectedPhotoUri }}
+                      source={heatmapImageSource}
                       style={{ width: heatmapDisplayW, height: heatmapDisplayH }}
                       contentFit="contain"
                       onLayout={(e) => {

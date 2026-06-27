@@ -617,10 +617,12 @@ export function registerFieldRoutes(app: Express): void {
           // 교육원 모드 진단 페이지(diagnosis/[id])에 필요한 전체 비전 분석 데이터
           full_analysis: {
             ...fa,
-            laserAnalysis:  fa.visionMeasurement?.laser_analysis ?? null,
-            filletAnalysis: fa.filletAnalysis ?? null,
-            isFillet:       detectedIsFillet,
-            weld_type:      detectedWeldType,
+            laserAnalysis:    fa.visionMeasurement?.laser_analysis ?? null,
+            filletAnalysis:   fa.filletAnalysis ?? null,
+            isFillet:         detectedIsFillet,
+            weld_type:        detectedWeldType,
+            // 레이저 제거 이미지: DB 비저장, 분석 직후 히트맵 배경으로만 사용
+            cleanImageBase64: (fa.visionMeasurement as any)?.clean_image_base64 ?? "",
           },
         });
       } catch (e: any) {

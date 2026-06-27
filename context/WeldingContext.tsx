@@ -149,6 +149,8 @@ export interface WeldingResult {
   trendScores: number[];
   filletAnalysis?: FilletAnalysis | null;
   isFillet?: boolean;
+  /** 레이저 제거 이미지 base64. 분석 직후만 유효 (DB 비저장). */
+  cleanImageBase64?: string;
   laserAnalysis?: {
     status: string;
     beadHeightMax: number;

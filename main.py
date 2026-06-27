@@ -1039,6 +1039,8 @@ async def analyze_welding_full(
             "side_status":           "ok" if side_vision_data else ("none" if not has_side_photo else "miss"),
             "laser_analysis":        vision_data.get("laser_analysis"),
             "bead_profile_2d":       vision_data.get("bead_profile_2d"),
+            # 히트맵 배경용 레이저 제거 이미지 (base64). DB 비저장 — 분석 직후 프론트에만 전달.
+            "clean_image_base64":    vision_data.get("clean_image_base64", ""),
         },
         # welding_calculator 원시 출력
         "weldScore": weld_data,

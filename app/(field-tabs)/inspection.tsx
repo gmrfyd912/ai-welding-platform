@@ -208,9 +208,10 @@ export default function InspectionScreen() {
         overallVerdict: raw.final_status === "PASS" ? "PASS" : "FAIL",
         top3Defects:    fa.top3Defects ?? [],
         trendScores:    [],
-        isFillet:       detectedIsFillet,
-        filletAnalysis: fa.filletAnalysis ?? null,
-        laserAnalysis:  fa.laserAnalysis ?? null,
+        isFillet:         detectedIsFillet,
+        filletAnalysis:   fa.filletAnalysis ?? null,
+        laserAnalysis:    fa.laserAnalysis ?? null,
+        cleanImageBase64: fa.cleanImageBase64 ?? "",
       };
 
       // ⑥ 폼 초기화 후 진단 리포트 화면으로 이동
