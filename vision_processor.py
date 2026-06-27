@@ -8,6 +8,64 @@ import math
 _BEAD_GEOM_FACTOR = 0.22
 
 
+def quick_inpaint_laser(image_bytes: bytes) -> bytes:
+    """Hough+HSV 마스크로 레이저 그리드를 제거한 이미지 반환 (Roboflow 전송 전 전처리용).
+
+    analyze_laser_grid 내부의 인페인팅과 동일한 로직이지만,
+    Roboflow 에 clean 이미지를 보내기 위해 파이프라인 앞단에서 독립 실행한다.
+    오버레이 이미지(결함 박스)에 레이저가 포함되는 문제를 제거.
+    """
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return image_bytes
+    h_img, w_img = img.shape[:2]
+
+    gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges   = cv2.Canny(blurred, 50, 150)
+    lines_raw = cv2.HoughLinesP(edges, 1, math.pi / 180, threshold=50,
+                                minLineLength=30, maxLineGap=10)
+
+    line_mask = np.zeros((h_img, w_img), dtype=np.uint8)
+    if lines_raw is not None:
+        for ln in lines_raw:
+            x1, y1, x2, y2 = ln[0]
+            angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
+            if angle <= 15 or angle >= 165 or 75 <= angle <= 105:
+                cv2.line(line_mask, (x1, y1), (x2, y2), 255, 4)
+
+    hsv        = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    m_green    = cv2.inRange(hsv, np.array([38, 80, 100]),  np.array([90, 255, 255]))
+    m_red1     = cv2.inRange(hsv, np.array([0,  80, 100]),  np.array([12, 255, 255]))
+    m_red2     = cv2.inRange(hsv, np.array([168, 80, 100]), np.array([180, 255, 255]))
+    color_mask = cv2.bitwise_or(m_green, cv2.bitwise_or(m_red1, m_red2))
+    combined   = cv2.bitwise_or(line_mask, color_mask)
+    krnl       = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    combined   = cv2.dilate(combined, krnl, iterations=1)
+
+    scale = min(1.0, 1024 / max(w_img, 1))
+    if scale < 1.0:
+        w_s, h_s = int(w_img * scale), int(h_img * scale)
+        img_s  = cv2.resize(img,      (w_s, h_s), interpolation=cv2.INTER_AREA)
+        mask_s = cv2.resize(combined, (w_s, h_s), interpolation=cv2.INTER_NEAREST)
+        mask_s = cv2.dilate(mask_s, krnl, iterations=1)
+    else:
+        img_s, mask_s = img, combined
+
+    if cv2.countNonZero(mask_s) > 30:
+        clean = cv2.inpaint(img_s, mask_s, inpaintRadius=4, flags=cv2.INPAINT_TELEA)
+    else:
+        clean = img_s.copy()
+
+    ok, buf = cv2.imencode(".jpg", clean, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    if ok:
+        print(f"[Inpaint:pre] {w_img}×{h_img} → clean {w_s if scale < 1.0 else w_img}px, "
+              f"mask_nonzero={cv2.countNonZero(mask_s)}")
+        return bytes(buf.tobytes())
+    return image_bytes
+
+
 def _robust_polyfit(ts: np.ndarray, ds: np.ndarray, degree: int, n_iter: int = 3):
     """
     IRLS(Iteratively Reweighted Least Squares) Huber-가중 polyfit.
@@ -359,7 +417,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         print(f"[LaserGrid] 레이저각={effective_laser_deg:.1f}°(수식미사용) | 촬영각={shooting_angle_used:.1f}°({shooting_angle_src})"
               f" | tan_cam={tan_angle:.4f} | ppm={ppm_used:.2f}({ppm_source})")
 
-        max_physical_h_mm = 10.0
+        max_physical_h_mm = 20.0  # 실제 용접 비드 최대 높이 (이전 10mm는 오탐 시 전 구간이 10mm로 클램프됨)
         max_deform_px = max_physical_h_mm * ppm_used * tan_angle * sin_shooting
 
         # ── [5b단계] 평탄면 외삽 기준 y (Toe 기준선 폴백용) ──────────────────
@@ -376,6 +434,23 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             _expected_center_y = below_ys[0] - n_steps * ref_spacing_px
         else:
             _expected_center_y = bead_center_y
+
+        # ── [5c단계] Toe 기준선 물리적 유효성 검증 ──────────────────────────────
+        # 폴리곤 과탐지 시 bead_y_max 가 평탄면 격자선보다 아래로 내려가면
+        # deform_px 가 폭발 → 전 구간이 max_deform_px 클램프에 걸려 h=20mm 반환.
+        # 평탄면 격자선(모재 표면의 실제 위치)을 기준으로 상/하한을 강제 적용.
+        if use_toe_baseline and below_ys:
+            flat_below_first = float(below_ys[0])
+            if _toe_y > flat_below_first:
+                print(f"[LaserGrid] ⚠ Toe 기준선 과탐지 교정: toe_y={_toe_y:.0f}px"
+                      f" > flat_y={flat_below_first:.0f}px → 평탄면 첫 선으로 대체")
+                _toe_y = flat_below_first
+        if use_toe_baseline and above_ys:
+            flat_above_last = float(above_ys[-1])
+            if _toe_y < flat_above_last:
+                print(f"[LaserGrid] ⚠ Toe 기준선 역전 교정: toe_y={_toe_y:.0f}px"
+                      f" < flat_above_y={flat_above_last:.0f}px → 비드 중심으로 폴백")
+                _toe_y = bead_center_y
 
         # ── [6단계] 구간별 변위 측정 ──────────────────────────────────────────
         bead_h_lines = [

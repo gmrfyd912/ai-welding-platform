@@ -13,7 +13,7 @@ from anthropic import AsyncAnthropic
 
 from welding_calculator import calculate_weld_score
 from gpt_advisor import get_expert_advice
-from vision_processor import analyze_bead_dimensions
+from vision_processor import analyze_bead_dimensions, quick_inpaint_laser
 
 app = FastAPI(title="Welding AI Master Pipeline")
 
@@ -684,8 +684,17 @@ async def analyze_welding_full(
     image_bytes, front_aruco = _rectify_for_roboflow(image_bytes_raw, "front")
     image_base64    = base64.b64encode(image_bytes).decode()
 
+    # ── 1b. 레이저 있는 경우 Roboflow 전 레이저 인페인팅 (clean image → Roboflow) ──
+    # Inpaint → Roboflow → analyze_bead_dimensions 순서로 실행.
+    # Roboflow 오버레이(결함 박스 이미지)에 레이저 그리드가 찍히는 문제를 차단.
+    # analyze_bead_dimensions 는 원본(image_bytes)을 계속 사용 → 레이저 높이 계산 정상.
+    if has_laser.lower() == "true":
+        robo_image_bytes = quick_inpaint_laser(image_bytes)
+    else:
+        robo_image_bytes = image_bytes
+
     # ── 2. 정면 Roboflow 호출 → vision_processor ──────────────────
-    front_robo  = await _call_roboflow(image_bytes, "front")
+    front_robo  = await _call_roboflow(robo_image_bytes, "front")
     # Roboflow 가 Reference_Marker 못 잡았으면 OpenCV ArUco 검출값으로 폴백 주입
     front_robo  = _inject_marker_fallback(front_robo, front_aruco, "front")
     front_preds = front_robo.get("predictions", [])

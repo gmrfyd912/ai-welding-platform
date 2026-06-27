@@ -120,8 +120,6 @@ export default function RegisterPhotoScreen() {
   const [cameraSlot, setCameraSlot] = useState<PhotoSlot | null>(null);
   const [isFillet, setIsFillet] = useState(false);
   const [hasLaser, setHasLaser] = useState(false);
-  const [laserAngle, setLaserAngle] = useState(90);
-  const [shootingAngle, setShootingAngle] = useState(45);
   const [beadType, setBeadType] = useState<"위빙 비드" | "스트레이트 비드">("위빙 비드");
   const [passType, setPassType] = useState<"싱글 패스" | "멀티 패스">("싱글 패스");
   const [plateThickness, setPlateThickness] = useState("");
@@ -253,8 +251,6 @@ export default function RegisterPhotoScreen() {
           aiModel: "gpt-4o",
           isFillet,
           hasLaser,
-          laserAngle: hasLaser ? laserAngle : undefined,
-          shootingAngle: hasLaser ? shootingAngle : undefined,
           analysisMode: "quick",
           beadType,
           passType,
@@ -458,42 +454,6 @@ export default function RegisterPhotoScreen() {
               </Pressable>
             ))}
           </View>
-          {hasLaser && (
-            <>
-              <View style={{ gap: 6 }}>
-                <Text style={styles.laserSubLabel}>격자 레이저 조사 각도</Text>
-                <View style={styles.modeSelector}>
-                  {[30, 45, 60, 90].map((deg) => (
-                    <Pressable
-                      key={deg}
-                      style={[styles.modeOption, laserAngle === deg && styles.modeOptionActive]}
-                      onPress={() => { setLaserAngle(deg); Haptics.selectionAsync(); }}
-                    >
-                      <Text style={[styles.modeOptionText, laserAngle === deg && styles.modeOptionTextActive]}>
-                        {deg}°
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-              <View style={{ gap: 6 }}>
-                <Text style={styles.laserSubLabel}>사진 촬영 각도</Text>
-                <View style={styles.modeSelector}>
-                  {[30, 45, 60, 90].map((deg) => (
-                    <Pressable
-                      key={deg}
-                      style={[styles.modeOption, shootingAngle === deg && styles.modeOptionActive]}
-                      onPress={() => { setShootingAngle(deg); Haptics.selectionAsync(); }}
-                    >
-                      <Text style={[styles.modeOptionText, shootingAngle === deg && styles.modeOptionTextActive]}>
-                        {deg}°
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            </>
-          )}
         </View>
 
         <View style={styles.section}>
