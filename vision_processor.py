@@ -336,15 +336,17 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         if lines_raw is None or len(lines_raw) == 0:
             return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
         # ── 길이 기반 Top-50 컷: 노이즈 폭발(>200선) 시에만 적용 ────────────────
+        # NumPy 벡터 연산으로 (N,1,4) shape를 보존하여 배열 붕괴 방지.
         # 200선 이하: 정상 검출 범위로 컷 미적용 (합성 테스트 포함).
         # 200선 초과: 누런 모재 반사 등으로 노이즈 폭발 → 가장 긴 선 50개만 통과.
-        # 진짜 레이저 선은 길게 뻗어 있으므로 길이 기준 정렬로 잡음 파편 제거.
         _n_raw = len(lines_raw)
-        if _n_raw > 200:
-            _lengths = np.array([
-                math.hypot(l[0][2] - l[0][0], l[0][3] - l[0][1]) for l in lines_raw
-            ])
-            lines_raw = lines_raw[np.argsort(_lengths)[::-1][:50]]
+        if lines_raw is not None and _n_raw > 200:
+            lengths    = np.sqrt(
+                (lines_raw[:, 0, 2] - lines_raw[:, 0, 0]) ** 2
+                + (lines_raw[:, 0, 3] - lines_raw[:, 0, 1]) ** 2
+            )
+            top_indices = np.argsort(lengths)[::-1][:50]
+            lines_raw   = lines_raw[top_indices]
             print(f"[LaserGrid] Top-50 컷: {_n_raw}개 → {len(lines_raw)}개 (길이 내림차순)")
         print(f"[LaserGrid] HoughLinesP 총 검출선={len(lines_raw)}개")
 
@@ -742,6 +744,9 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         }
 
     except Exception as e:
+        import traceback
+        print(f"\033[91m[LaserGrid] 예외 발생 — 스택 트레이스:\033[0m")
+        traceback.print_exc()
         return {"status": "error", "message": f"레이저 격자 분석 오류: {str(e)}"}
 
 
