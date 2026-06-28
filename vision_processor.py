@@ -556,18 +556,20 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             actual_y  = float(np.median(seg_ys))
             # 기준선(Toe 연결선 또는 외삽 y)에서 얼마나 위(작은 y)로 이동했는지
             # 볼록 비드 → actual_y < baseline_y → deform_px > 0 → 높이 양수
-            deform_px = _baseline_y(x_center) - actual_y
+            baseline_y = _baseline_y(x_center)
+            # [안전장치] baseline_y가 actual_y에서 비정상적으로 멀어지는 것을 방지 (최대 100px 이내로 제한)
+            _MAX_DEFORM_PX = 100
+            if baseline_y - actual_y > _MAX_DEFORM_PX:
+                baseline_y = actual_y + _MAX_DEFORM_PX
+            elif actual_y - baseline_y > _MAX_DEFORM_PX:
+                baseline_y = actual_y - _MAX_DEFORM_PX
+            deform_px = baseline_y - actual_y
             profile_raw.append((x_pct, deform_px, actual_y))
 
         if not profile_raw:
             return {"status": "error", "message": "비드 위 격자 변형을 측정하지 못했습니다"}
 
-        # 진단 로그: 구간별 변위 값 출력
         print(f"[LaserGrid] bead_h_lines={len(bead_h_lines)} | 프로파일 구간={len(profile_raw)}")
-        for _xp, _dp, _ay in profile_raw:
-            _bl = _baseline_y(_xp * w_img / 100)
-            _raw_h = round(_dp / sin_shooting / ppm_used / tan_angle, 2) if (ppm_used > 0 and tan_angle > 0) else 0
-            print(f"  x={_xp:.1f}% | actual_y={_ay:.0f} | baseline_y={_bl:.0f} | deform={_dp:.1f}px | 원시h={_raw_h}mm")
 
         # ── debug_metrics: 최대 변위 구간의 핵심 4변수 추출 ─────────────────────
         _dbg_idx = int(np.argmax(np.abs([p[1] for p in profile_raw])))
