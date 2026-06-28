@@ -302,11 +302,11 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
         # 녹색 레이저 HSV 범위 (532nm 녹색 레이저: H≈60 in OpenCV [0,180])
-        #   H: 45~75  → 쨍한 녹색만 좁게 타겟팅 (불필요한 노란·청록 제외)
-        #   S: 100~255 → 채도 100 이상 (백색 반사광·저채도 잡음 완전 차단)
-        #   V: 100~255 → 밝기 100 이상 (어두운 배경 그림자 제외)
-        _lo_g = np.array([45, 100, 100], dtype=np.uint8)
-        _hi_g = np.array([75, 255, 255], dtype=np.uint8)
+        #   H: 40~80  → 노란녹~청록 포용 (현장 금속 반사로 색상 약간 이동 허용)
+        #   S: 50~255 → 채도 50 이상 (현장 과노출·반사로 S가 60~80대로 저하됨을 허용)
+        #   V: 50~255 → 밝기 50 이상 (그림자 영역 제외)
+        _lo_g = np.array([40,  50,  50], dtype=np.uint8)
+        _hi_g = np.array([80, 255, 255], dtype=np.uint8)
         laser_mask = cv2.inRange(hsv, _lo_g, _hi_g)
 
         # 형태학적 팽창 2회: 끊어진 레이저 선 조각 연결 (3×3 커널)
@@ -321,7 +321,9 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             edges = laser_mask
         else:
             # HSV로 레이저를 못 잡은 경우(조명 특이 환경) → 그레이스케일 Canny 폴백
-            print("[LaserGrid] HSV 마스크 부족 → 그레이스케일 Canny 폴백")
+            # ⚠️ Canny는 6,000+ 잡음 선을 검출할 수 있어 actual_y 폭발 위험.
+            #    HoughLinesP 결과를 길이 상위 50개로 제한하여 노이즈 폭발 원천 차단.
+            print("[LaserGrid] HSV 마스크 부족 → 그레이스케일 Canny 폴백 (상위 50선 제한)")
             _gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             _blurred = cv2.GaussianBlur(_gray, (5, 5), 0)
             edges    = cv2.Canny(_blurred, 50, 150)
@@ -333,6 +335,13 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                                     minLineLength=20, maxLineGap=25)
         if lines_raw is None or len(lines_raw) == 0:
             return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
+        # Canny 폴백 시 노이즈 폭발 방지: 선 길이 내림차순으로 상위 50개만 사용
+        if _laser_px < 100 and len(lines_raw) > 50:
+            _lengths = np.array([
+                math.hypot(l[0][2] - l[0][0], l[0][3] - l[0][1]) for l in lines_raw
+            ])
+            lines_raw = lines_raw[np.argsort(_lengths)[::-1][:50]]
+            print(f"[LaserGrid] Canny 폴백 노이즈 차단: {len(_lengths)}개 → 50개로 제한")
         print(f"[LaserGrid] HoughLinesP 총 검출선={len(lines_raw)}개")
 
         h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
