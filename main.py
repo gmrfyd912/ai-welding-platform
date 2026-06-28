@@ -659,7 +659,7 @@ async def analyze_welding_full(
     is_fillet: str = Form("false"),
     has_laser: str = Form("false"),
     laser_angle_deg: str = Form("45"),
-    shooting_angle_deg: str = Form("90"),
+    shooting_angle_deg: str = Form("45"),
     analysis_mode: str = Form("ai"),
 ):
     # Map language code → human-readable name for the AI prompt

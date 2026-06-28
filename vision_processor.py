@@ -302,11 +302,11 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
         # 녹색 레이저 HSV 범위 (532nm 녹색 레이저: H≈60 in OpenCV [0,180])
-        #   H: 35~85  → 노란녹색~청록 (532nm 녹색은 H≈60으로 중앙 적중)
-        #   S: 50~255 → 채도 50 이상 (백색 반사광·스패터 제외)
-        #   V: 50~255 → 밝기 50 이상 (그림자 제외)
-        _lo_g = np.array([35,  50,  50], dtype=np.uint8)
-        _hi_g = np.array([85, 255, 255], dtype=np.uint8)
+        #   H: 45~75  → 쨍한 녹색만 좁게 타겟팅 (불필요한 노란·청록 제외)
+        #   S: 100~255 → 채도 100 이상 (백색 반사광·저채도 잡음 완전 차단)
+        #   V: 100~255 → 밝기 100 이상 (어두운 배경 그림자 제외)
+        _lo_g = np.array([45, 100, 100], dtype=np.uint8)
+        _hi_g = np.array([75, 255, 255], dtype=np.uint8)
         laser_mask = cv2.inRange(hsv, _lo_g, _hi_g)
 
         # 형태학적 팽창 2회: 끊어진 레이저 선 조각 연결 (3×3 커널)
@@ -463,6 +463,11 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         else:
             shooting_angle_used = shooting_angle_deg
             shooting_angle_src  = "param"
+        # tan(89°+) = 57~∞ → h_mm ≈ 0 버그 방지: 89° 이상은 45°(tan=1.0)로 클램프
+        if shooting_angle_used >= 89.0:
+            print(f"[LaserGrid] 촬영각 {shooting_angle_used:.1f}° ≥ 89° → 45.0°로 클램프 (tan 무한대 방지)")
+            shooting_angle_used = 45.0
+            shooting_angle_src  += "+clamped"
         effective_laser_deg = min(laser_angle_deg, 80.0) if laser_angle_deg >= 85.0 else laser_angle_deg
         # 수직 레이저(90°)에서는 tan(laser_angle)이 무한대 → 공식에서 제외.
         # 카메라 앙각(shooting_angle_used)으로 변위를 역산: h = deform / (tan(θ_cam) * ppm)
