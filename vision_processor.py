@@ -293,26 +293,54 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             return {"status": "error", "message": "이미지 디코딩 실패"}
 
         h_img, w_img = img.shape[:2]
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 50, 150)
 
-        # ── [2단계] 격자선 검출 ────────────────────────────────────────────────
-        # 현장 사진: 요철·금속 반사로 레이저 선이 끊기므로 임계값 대폭 완화
-        #   threshold  50→25: 지지 픽셀 수 기준 완화
-        #   minLineLength 30→10: 짧게 끊어진 선도 인정
-        #   maxLineGap    10→35: 멀리 떨어진 조각도 하나의 선으로 연결
-        lines_raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=25,
-                                    minLineLength=10, maxLineGap=35)
+        # ── [1b단계] HSV 녹색 레이저 마스킹 ──────────────────────────────────
+        # 진단 근거: 순수 Canny(Gray)는 현장 사진에서 6,996개 선 검출(수평 1,822개).
+        # 비레이저 노이즈(비드 표면·철판 끝단·지그)가 압도 → actual_y 오염 → 0mm.
+        # 해법: BGR→HSV 변환 후 녹색 레이저 픽셀만 추출한 마스크를
+        #        HoughLinesP 입력으로 대체 → 10~30개의 진짜 레이저 선만 검출.
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+        # 녹색 레이저 HSV 범위 (532nm 녹색 레이저: H≈60 in OpenCV [0,180])
+        #   H: 35~85  → 노란녹색~청록 (532nm 녹색은 H≈60으로 중앙 적중)
+        #   S: 50~255 → 채도 50 이상 (백색 반사광·스패터 제외)
+        #   V: 50~255 → 밝기 50 이상 (그림자 제외)
+        _lo_g = np.array([35,  50,  50], dtype=np.uint8)
+        _hi_g = np.array([85, 255, 255], dtype=np.uint8)
+        laser_mask = cv2.inRange(hsv, _lo_g, _hi_g)
+
+        # 형태학적 팽창 2회: 끊어진 레이저 선 조각 연결 (3×3 커널)
+        _kern3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        laser_mask = cv2.dilate(laser_mask, _kern3, iterations=2)
+
+        _laser_px = int(cv2.countNonZero(laser_mask))
+        print(f"[LaserGrid] HSV 녹색 마스크 픽셀={_laser_px} / 전체={w_img*h_img}")
+
+        if _laser_px >= 100:
+            # 레이저 픽셀 충분: 마스크가 이미 이진화 → Canny 불필요
+            edges = laser_mask
+        else:
+            # HSV로 레이저를 못 잡은 경우(조명 특이 환경) → 그레이스케일 Canny 폴백
+            print("[LaserGrid] HSV 마스크 부족 → 그레이스케일 Canny 폴백")
+            _gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            _blurred = cv2.GaussianBlur(_gray, (5, 5), 0)
+            edges    = cv2.Canny(_blurred, 50, 150)
+
+        # ── [2단계] 격자선 검출 (HSV 마스크 기반 → 노이즈 대폭 감소) ──────────
+        # HSV 마스크 사용 시 입력이 이미 레이저 선만 남은 이진 이미지이므로
+        # threshold/minLineLength를 원래 수준으로 복원해도 과검출이 발생하지 않음.
+        lines_raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=30,
+                                    minLineLength=20, maxLineGap=25)
         if lines_raw is None or len(lines_raw) == 0:
             return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
+        print(f"[LaserGrid] HoughLinesP 총 검출선={len(lines_raw)}개")
 
         h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
         v_lines = []
         for line in lines_raw:
             x1, y1, x2, y2 = line[0]
             length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-            if length < 10:   # minLineLength 와 동기화
+            if length < 20:   # minLineLength 와 동기화
                 continue
             angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
             center_y = (y1 + y2) / 2.0
