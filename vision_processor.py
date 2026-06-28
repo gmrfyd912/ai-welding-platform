@@ -345,14 +345,21 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             horizontal_mask = dx >= (dy * 0.5)   # 세로선(dx < dy/2) 배제
             h_lines_raw = lines_raw[horizontal_mask]
             if len(h_lines_raw) > 0:
-                f_dx = dx[horizontal_mask]
-                f_dy = dy[horizontal_mask]
+                # Y좌표 밀집 필터: 중앙값 ±400px 밖 선(철판 테두리 노이즈) 제거
+                ys_mid = (h_lines_raw[:, 0, 1].astype(float) + h_lines_raw[:, 0, 3].astype(float)) / 2.0
+                median_y = float(np.median(ys_mid))
+                cluster_mask = np.abs(ys_mid - median_y) <= 400
+                h_lines_raw = h_lines_raw[cluster_mask]
+                print(f"[LaserGrid] Y밀집필터: median_y={median_y:.0f}px, 생존={cluster_mask.sum()}개/{len(cluster_mask)}개")
+            if len(h_lines_raw) > 0:
+                f_dx = np.abs(h_lines_raw[:, 0, 2] - h_lines_raw[:, 0, 0])
+                f_dy = np.abs(h_lines_raw[:, 0, 3] - h_lines_raw[:, 0, 1])
                 lengths     = np.sqrt(f_dx ** 2 + f_dy ** 2)
                 top_indices = np.argsort(lengths)[::-1][:50]
                 lines_raw   = h_lines_raw[top_indices]
             else:
                 lines_raw = h_lines_raw  # 수평선 전혀 없으면 빈 배열 그대로
-            print(f"[LaserGrid] 수평우선 Top-50 컷: {_n_raw}개 → 수평{len(h_lines_raw)}개 → {len(lines_raw)}개")
+            print(f"[LaserGrid] 수평우선 Top-50 컷: {_n_raw}개 → 수평필터 → Y밀집필터 → {len(lines_raw)}개")
         print(f"[LaserGrid] HoughLinesP 총 검출선={len(lines_raw)}개")
 
         h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
