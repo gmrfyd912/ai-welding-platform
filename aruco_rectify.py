@@ -43,20 +43,48 @@ def _preprocess_for_aruco(img: np.ndarray) -> np.ndarray:
     )
 
 
+def _make_aruco_params():
+    """산업 현장형 DetectorParameters 생성.
+
+    용접 철판의 금속 반사(글레어), 불균일 조명, 원거리 촬영에서
+    마커 탐지율을 높이기 위한 파라미터 세트.
+    새 API(OpenCV 4.7+)와 구 API 모두 지원.
+    """
+    try:
+        p = cv2.aruco.DetectorParameters()
+    except AttributeError:
+        p = cv2.aruco.DetectorParameters_create()  # type: ignore[attr-defined]
+
+    # 이진화 블록 크기 범위 확장: 작은 마커(원거리)~큰 마커(근거리) 모두 대응
+    p.adaptiveThreshWinSizeMin  = 3
+    p.adaptiveThreshWinSizeMax  = 53
+    p.adaptiveThreshWinSizeStep = 4
+    p.adaptiveThreshConstant    = 4   # 노이즈로 인한 이진화 훼손 방지
+
+    # 원거리 소형 마커도 검출 (기본값 0.03 → 0.01)
+    p.minMarkerPerimeterRate = 0.01
+
+    # 반사/오염으로 마커 비트 일부 손상되어도 복구 (기본값 0.6 → 0.9)
+    p.errorCorrectionRate = 0.9
+
+    return p
+
+
 def _detect_largest_marker(gray: np.ndarray) -> Optional[np.ndarray]:
     """여러 ArUco 사전을 순회하며 가장 큰(면적 최대) 마커 4 모서리 반환."""
     best: Optional[np.ndarray] = None
     best_area = 0.0
+    params = _make_aruco_params()
     for dict_id in _DICT_IDS:
         try:
             dictionary = cv2.aruco.getPredefinedDictionary(dict_id)
             try:
-                params = cv2.aruco.DetectorParameters()
                 detector = cv2.aruco.ArucoDetector(dictionary, params)
                 corners, ids, _ = detector.detectMarkers(gray)
             except AttributeError:
-                params = cv2.aruco.DetectorParameters_create()  # type: ignore[attr-defined]
-                corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
+                corners, ids, _ = cv2.aruco.detectMarkers(  # type: ignore[attr-defined]
+                    gray, dictionary, parameters=params
+                )
             if ids is None or len(corners) == 0:
                 continue
             for c in corners:

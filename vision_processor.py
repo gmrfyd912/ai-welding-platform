@@ -24,8 +24,9 @@ def quick_inpaint_laser(image_bytes: bytes) -> bytes:
     gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edges   = cv2.Canny(blurred, 50, 150)
-    lines_raw = cv2.HoughLinesP(edges, 1, math.pi / 180, threshold=50,
-                                minLineLength=30, maxLineGap=10)
+    # 현장 사진: 요철·반사로 레이저 선이 끊기므로 임계값 완화
+    lines_raw = cv2.HoughLinesP(edges, 1, math.pi / 180, threshold=25,
+                                minLineLength=10, maxLineGap=35)
 
     line_mask = np.zeros((h_img, w_img), dtype=np.uint8)
     if lines_raw is not None:
@@ -297,8 +298,12 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         edges = cv2.Canny(blurred, 50, 150)
 
         # ── [2단계] 격자선 검출 ────────────────────────────────────────────────
-        lines_raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=50,
-                                    minLineLength=30, maxLineGap=10)
+        # 현장 사진: 요철·금속 반사로 레이저 선이 끊기므로 임계값 대폭 완화
+        #   threshold  50→25: 지지 픽셀 수 기준 완화
+        #   minLineLength 30→10: 짧게 끊어진 선도 인정
+        #   maxLineGap    10→35: 멀리 떨어진 조각도 하나의 선으로 연결
+        lines_raw = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=25,
+                                    minLineLength=10, maxLineGap=35)
         if lines_raw is None or len(lines_raw) == 0:
             return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
 
@@ -307,7 +312,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         for line in lines_raw:
             x1, y1, x2, y2 = line[0]
             length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-            if length < 30:
+            if length < 10:   # minLineLength 와 동기화
                 continue
             angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
             center_y = (y1 + y2) / 2.0
