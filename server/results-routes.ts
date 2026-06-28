@@ -150,9 +150,11 @@ export function registerResultsRoutes(app: Express): void {
     try {
       const url = await uploadBase64ToGoogleDrive(base64, fileName);
       res.json({ url });
-    } catch (err) {
-      console.error("드라이브 업로드 오류:", err);
-      res.status(500).json({ error: "사진 업로드 실패" });
+    } catch (err: any) {
+      // 구글 드라이브 에러(invalid_grant 등)를 격리 → 파이프라인 차단 방지.
+      // 업로드 실패는 로그만 남기고 200 OK + null URL 반환으로 후속 분석 보장.
+      console.error("[Node] 구글 드라이브 백업 실패 (무시하고 로컬 분석 진행):", err?.message ?? err);
+      res.json({ url: null });
     }
   });
 

@@ -64,7 +64,14 @@ export async function uploadBase64ToGoogleDrive(
   fileName: string
 ): Promise<string> {
   const drive = getDriveClient();
-  const folderId = await getOrCreateFolder();
+  let folderId: string;
+  try {
+    folderId = await getOrCreateFolder();
+  } catch (folderErr: any) {
+    // 폴더 조회/생성 실패(토큰 만료 등) 시 캐시 무효화 후 상위로 전파
+    cachedFolderId = null;
+    throw folderErr;
+  }
 
   // base64 → Buffer → Readable stream
   const buffer = Buffer.from(base64, "base64");
