@@ -302,10 +302,10 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
         # 녹색 레이저 HSV 범위 (532nm 녹색 레이저: H≈60 in OpenCV [0,180])
-        #   H: 40~80  → 노란녹~청록 포용 (현장 금속 반사로 색상 약간 이동 허용)
-        #   S: 50~255 → 채도 50 이상 (현장 과노출·반사로 S가 60~80대로 저하됨을 허용)
-        #   V: 50~255 → 밝기 50 이상 (그림자 영역 제외)
-        _lo_g = np.array([40,  50,  50], dtype=np.uint8)
+        #   H: 45~80  → 황색(H<45) 용접 모재 노이즈 차단, 청록까지 포용
+        #   S: 80~255 → H=40대 황색 반사광(458만 픽셀 폭발) 차단
+        #   V: 80~255 → 어두운 배경 제외
+        _lo_g = np.array([45,  80,  80], dtype=np.uint8)
         _hi_g = np.array([80, 255, 255], dtype=np.uint8)
         laser_mask = cv2.inRange(hsv, _lo_g, _hi_g)
 
@@ -335,13 +335,17 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                                     minLineLength=20, maxLineGap=25)
         if lines_raw is None or len(lines_raw) == 0:
             return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
-        # Canny 폴백 시 노이즈 폭발 방지: 선 길이 내림차순으로 상위 50개만 사용
-        if _laser_px < 100 and len(lines_raw) > 50:
+        # ── 길이 기반 Top-50 컷: 노이즈 폭발(>200선) 시에만 적용 ────────────────
+        # 200선 이하: 정상 검출 범위로 컷 미적용 (합성 테스트 포함).
+        # 200선 초과: 누런 모재 반사 등으로 노이즈 폭발 → 가장 긴 선 50개만 통과.
+        # 진짜 레이저 선은 길게 뻗어 있으므로 길이 기준 정렬로 잡음 파편 제거.
+        _n_raw = len(lines_raw)
+        if _n_raw > 200:
             _lengths = np.array([
                 math.hypot(l[0][2] - l[0][0], l[0][3] - l[0][1]) for l in lines_raw
             ])
             lines_raw = lines_raw[np.argsort(_lengths)[::-1][:50]]
-            print(f"[LaserGrid] Canny 폴백 노이즈 차단: {len(_lengths)}개 → 50개로 제한")
+            print(f"[LaserGrid] Top-50 컷: {_n_raw}개 → {len(lines_raw)}개 (길이 내림차순)")
         print(f"[LaserGrid] HoughLinesP 총 검출선={len(lines_raw)}개")
 
         h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
