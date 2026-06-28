@@ -335,19 +335,24 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                                     minLineLength=20, maxLineGap=25)
         if lines_raw is None or len(lines_raw) == 0:
             return {"status": "error", "message": "격자선을 검출하지 못했습니다"}
-        # ── 길이 기반 Top-50 컷: 노이즈 폭발(>200선) 시에만 적용 ────────────────
-        # NumPy 벡터 연산으로 (N,1,4) shape를 보존하여 배열 붕괴 방지.
-        # 200선 이하: 정상 검출 범위로 컷 미적용 (합성 테스트 포함).
-        # 200선 초과: 누런 모재 반사 등으로 노이즈 폭발 → 가장 긴 선 50개만 통과.
+        # ── 수평선 우선 필터링 + Top-50 컷: 노이즈 폭발(>200선) 시에만 적용 ───────
+        # 길이만으로 자르면 긴 세로 스크래치 50개가 선발되어 h_lines=0 증발 발생.
+        # 수평 마스크(dx >= dy*0.5)로 가파른 세로선을 먼저 배제한 뒤 Top-50 추출.
         _n_raw = len(lines_raw)
         if lines_raw is not None and _n_raw > 200:
-            lengths    = np.sqrt(
-                (lines_raw[:, 0, 2] - lines_raw[:, 0, 0]) ** 2
-                + (lines_raw[:, 0, 3] - lines_raw[:, 0, 1]) ** 2
-            )
-            top_indices = np.argsort(lengths)[::-1][:50]
-            lines_raw   = lines_raw[top_indices]
-            print(f"[LaserGrid] Top-50 컷: {_n_raw}개 → {len(lines_raw)}개 (길이 내림차순)")
+            dx = np.abs(lines_raw[:, 0, 2] - lines_raw[:, 0, 0])
+            dy = np.abs(lines_raw[:, 0, 3] - lines_raw[:, 0, 1])
+            horizontal_mask = dx >= (dy * 0.5)   # 세로선(dx < dy/2) 배제
+            h_lines_raw = lines_raw[horizontal_mask]
+            if len(h_lines_raw) > 0:
+                f_dx = dx[horizontal_mask]
+                f_dy = dy[horizontal_mask]
+                lengths     = np.sqrt(f_dx ** 2 + f_dy ** 2)
+                top_indices = np.argsort(lengths)[::-1][:50]
+                lines_raw   = h_lines_raw[top_indices]
+            else:
+                lines_raw = h_lines_raw  # 수평선 전혀 없으면 빈 배열 그대로
+            print(f"[LaserGrid] 수평우선 Top-50 컷: {_n_raw}개 → 수평{len(h_lines_raw)}개 → {len(lines_raw)}개")
         print(f"[LaserGrid] HoughLinesP 총 검출선={len(lines_raw)}개")
 
         h_lines = []  # (center_y, center_x, x1, y1, x2, y2, length)
