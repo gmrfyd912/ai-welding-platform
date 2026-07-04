@@ -529,6 +529,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         _all_h_mid_ys = [(y1 + y2) / 2.0 for (cy, cx, x1, y1, x2, y2, length) in h_lines]
         global_median_y = float(np.median(_all_h_mid_ys)) if _all_h_mid_ys else float(bead_center_y)
         print(f"[LaserGrid] 전체 레이저 기준 Y(global_median): {global_median_y:.0f}px (h_lines={len(h_lines)}개 기반)")
+        print(f"[FACT-RECHECK-INIT] 계산된 global_median_y: {global_median_y}", flush=True)
 
         # ── [6단계] 구간별 변위 측정 ──────────────────────────────────────────
         bead_h_lines = [
@@ -617,6 +618,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
             if use_toe_baseline:
                 h_mm = max(0.0, h_mm)  # 볼록 비드: 음수 방지 (상한은 PPM 수식이 보장)
+            print(f"[FACT-RECHECK-LOOP] actual_y: {actual_y} | baseline_y: {baseline_y} | deform_px: {deform_px} | h_mm: {h_mm}", flush=True)
             heights_mm.append(h_mm)
             profile.append({
                 "x_pct":        x_pct,
