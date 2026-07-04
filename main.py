@@ -2,6 +2,7 @@ import os
 import math
 import base64
 import asyncio
+import traceback
 import httpx
 import cv2
 import numpy as np
@@ -430,7 +431,7 @@ async def analyze_weld_legacy(
             "expert_report":   expert_report,
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e), "detail": traceback.format_exc()})
 
 # ==========================================
 # [API 엔드포인트 2] 통합 분석 (메인)
