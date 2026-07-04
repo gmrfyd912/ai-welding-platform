@@ -126,9 +126,10 @@ function rowToResult(row: any) {
 
 function rowToResultLite(row: any) {
   const r = rowToResult(row);
-  // 목록 조회: http(s):// URL만 허용, data: base64는 완전히 제외
+  // 목록 조회: http(s):// URL 및 data: base64 이미지 모두 허용
+  // photo_analyses/laser_analysis 등 무거운 분석 JSON은 별도로 제외(아래 undefined 처리)
   const stripBase64 = (v: any) =>
-    typeof v === "string" && (v.startsWith("http://") || v.startsWith("https://")) ? v : undefined;
+    typeof v === "string" && (v.startsWith("http://") || v.startsWith("https://") || v.startsWith("data:")) ? v : undefined;
   const photos = r.photos as any;
   const litePhotos = photos
     ? {
