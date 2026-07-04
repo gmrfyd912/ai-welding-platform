@@ -338,6 +338,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         # ── 수평선 우선 필터링 + Top-50 컷: 노이즈 폭발(>200선) 시에만 적용 ───────
         # 길이만으로 자르면 긴 세로 스크래치 50개가 선발되어 h_lines=0 증발 발생.
         # 수평 마스크(dx >= dy*0.5)로 가파른 세로선을 먼저 배제한 뒤 Top-50 추출.
+        global_true_baseline = 0.0   # Y-clustering 필터링 전 순정 median_y 보관용
         _n_raw = len(lines_raw)
         if lines_raw is not None and _n_raw > 200:
             dx = np.abs(lines_raw[:, 0, 2] - lines_raw[:, 0, 0])
@@ -348,6 +349,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                 # Y좌표 밀집 필터: 중앙값 ±400px 밖 선(철판 테두리 노이즈) 제거
                 ys_mid = (h_lines_raw[:, 0, 1].astype(float) + h_lines_raw[:, 0, 3].astype(float)) / 2.0
                 median_y = float(np.median(ys_mid))
+                global_true_baseline = median_y   # Top-50 필터 전 순정 중앙값 보존
                 cluster_mask = np.abs(ys_mid - median_y) <= 400
                 h_lines_raw = h_lines_raw[cluster_mask]
                 print(f"[LaserGrid] Y밀집필터: median_y={median_y:.0f}px, 생존={cluster_mask.sum()}개/{len(cluster_mask)}개")
@@ -521,16 +523,6 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         else:
             _expected_center_y = bead_center_y
 
-        # ── [5c단계] 전체 레이저 기준 Y (global median 기반) ─────────────────
-        # flat_ys(비드 외부선만)의 median은 비드 위 선들보다 Y가 더 작아
-        # deform_px = baseline_y - actual_y 가 음수가 되는 오류를 유발.
-        # 전체 h_lines(비드 포함)의 중간 Y 중앙값을 사용하면:
-        #   비드 위 라인(actual_y 더 작음) < global_median_y → deform_px 양수 보장.
-        _all_h_mid_ys = [(y1 + y2) / 2.0 for (cy, cx, x1, y1, x2, y2, length) in h_lines]
-        global_median_y = float(np.median(_all_h_mid_ys)) if _all_h_mid_ys else float(bead_center_y)
-        print(f"[LaserGrid] 전체 레이저 기준 Y(global_median): {global_median_y:.0f}px (h_lines={len(h_lines)}개 기반)")
-        print(f"[FACT-RECHECK-INIT] 계산된 global_median_y: {global_median_y}", flush=True)
-
         # ── [6단계] 구간별 변위 측정 ──────────────────────────────────────────
         bead_h_lines = [
             (cy, cx, x1, y1, x2, y2, length)
@@ -564,10 +556,9 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                 continue
 
             actual_y  = float(np.median(seg_ys))
-            # 기준선(Toe 연결선 또는 외삽 y)에서 얼마나 위(작은 y)로 이동했는지
-            # 볼록 비드 → actual_y < baseline_y → deform_px > 0 → 높이 양수
-            # 전체 h_lines 중간 Y 중앙값을 바닥 기준으로 사용
-            baseline_y = global_median_y
+            # Top-50 필터 이전의 순정 Y-clustering median을 바닥 기준으로 사용
+            # (Top-50은 비드 위 짧은 선을 배제하므로 편향된 median을 만들 수 있음)
+            baseline_y = global_true_baseline if global_true_baseline != 0.0 else float(bead_center_y)
             # [안전장치] baseline_y가 actual_y에서 비정상적으로 멀어지는 것을 방지
             # 물리적 최대 허용 높이(8.0mm)를 현재 PPM 기준 픽셀로 변환하여 동적 적용
             _MAX_DEFORM_PX = 8.0 * ppm_used
@@ -618,7 +609,6 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
             if use_toe_baseline:
                 h_mm = max(0.0, h_mm)  # 볼록 비드: 음수 방지 (상한은 PPM 수식이 보장)
-            print(f"[FACT-RECHECK-LOOP] actual_y: {actual_y} | baseline_y: {baseline_y} | deform_px: {deform_px} | h_mm: {h_mm}", flush=True)
             heights_mm.append(h_mm)
             profile.append({
                 "x_pct":        x_pct,
