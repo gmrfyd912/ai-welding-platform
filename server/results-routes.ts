@@ -126,19 +126,28 @@ function rowToResult(row: any) {
 
 function rowToResultLite(row: any) {
   const r = rowToResult(row);
-  const stripPhoto = (v: any) => (isValidDisplayUrl(v) ? v : undefined);
+  // 목록 조회: http(s):// URL만 허용, data: base64는 완전히 제외
+  const stripBase64 = (v: any) =>
+    typeof v === "string" && (v.startsWith("http://") || v.startsWith("https://")) ? v : undefined;
   const photos = r.photos as any;
   const litePhotos = photos
     ? {
-        front: stripPhoto(photos.front),
-        side: stripPhoto(photos.side),
-        back: stripPhoto(photos.back),
+        front: stripBase64(photos.front),
+        side: stripBase64(photos.side),
+        back: stripBase64(photos.back),
       }
     : undefined;
   return {
     ...r,
-    photoUri: stripPhoto(r.photoUri),
-    photos: litePhotos,
+    photoUri:           stripBase64(r.photoUri),
+    photos:             litePhotos,
+    // 목록에서 무거운 상세 분석 필드 제외 (상세 조회 GET /api/results/:id 에서만 반환)
+    photoAnalyses:      undefined,
+    improvements:       undefined,
+    comprehensiveReport: undefined,
+    defectLocations:    undefined,
+    laserAnalysis:      undefined,
+    filletAnalysis:     undefined,
   };
 }
 
@@ -160,8 +169,19 @@ export function registerResultsRoutes(app: Express): void {
 
   app.get("/api/results", async (_req: Request, res: Response) => {
     try {
+      // photo_uri, photos, photo_analyses, laser_analysis, fillet_analysis 등
+      // base64 이미지·대용량 분석 컬럼을 DB 단계부터 제외 → 15MB → ~100KB
       const result = await pool.query(
-        "SELECT r.*, COALESCE(r.user_course_name, u.course_name) as user_course_name FROM weld_results r LEFT JOIN weld_users u ON r.user_id = u.id ORDER BY r.timestamp DESC"
+        `SELECT r.id, r.user_id, r.user_name, r.user_profile_uri,
+                COALESCE(r.user_course_name, u.course_name) AS user_course_name,
+                r.process, r.process_custom, r.posture, r.posture_custom,
+                r.material, r.material_custom, r.bead_type,
+                r.self_score, r.ai_score, r.grade, r.overall_verdict,
+                r.bead_analysis, r.defects, r.top3_defects, r.trend_scores,
+                r.timestamp, r.is_fillet
+         FROM weld_results r
+         LEFT JOIN weld_users u ON r.user_id = u.id
+         ORDER BY r.timestamp DESC`
       );
       res.json(result.rows.map(rowToResultLite));
     } catch (err) {
