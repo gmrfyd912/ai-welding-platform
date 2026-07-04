@@ -7,6 +7,7 @@ import {
   Pressable,
   Image,
   RefreshControl,
+  ActivityIndicator,
   Platform,
   Alert,
   Modal,
@@ -139,7 +140,7 @@ function ResultCard({
 export default function GalleryScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { results, isLoading, refreshResults, deleteResult, migrateLocalFileUris } = useWelding();
+  const { results, isLoading, isLoadingMore, hasMore, refreshResults, loadMoreResults, deleteResult, migrateLocalFileUris } = useWelding();
   const { t } = useLanguage();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState("전체");
@@ -302,6 +303,13 @@ export default function GalleryScreen() {
             onRefresh={onRefresh}
             tintColor={Colors.primary}
           />
+        }
+        onEndReached={hasMore ? loadMoreResults : undefined}
+        onEndReachedThreshold={0.3}
+        ListFooterComponent={
+          isLoadingMore
+            ? <ActivityIndicator color={Colors.primary} style={{ paddingVertical: 20 }} />
+            : null
         }
         showsVerticalScrollIndicator={false}
       />

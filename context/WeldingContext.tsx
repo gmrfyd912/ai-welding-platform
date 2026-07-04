@@ -3,6 +3,7 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useRef,
   useMemo,
   ReactNode,
   useCallback,
@@ -193,12 +194,15 @@ export interface WeldingResult {
 interface WeldingContextValue {
   results: WeldingResult[];
   isLoading: boolean;
+  isLoadingMore: boolean;
+  hasMore: boolean;
   addResult: (result: WeldingResult) => Promise<void>;
   updatePhotos: (id: string, photoUri: string, photos: WeldingResult["photos"]) => Promise<void>;
   deleteResult: (id: string) => Promise<void>;
   getResultById: (id: string) => WeldingResult | undefined;
   getUserResults: (userId: string) => WeldingResult[];
   refreshResults: () => Promise<void>;
+  loadMoreResults: () => Promise<void>;
   migrateLocalFileUris: (userId: string) => Promise<void>;
 }
 
@@ -299,20 +303,31 @@ function simulateAiAnalysis(selfScore: number, photoUri: string): Omit<WeldingRe
   };
 }
 
+const PAGE_SIZE = 20;
+
 export function WeldingProvider({ children }: { children: ReactNode }) {
   const [results, setResults] = useState<WeldingResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const pageOffsetRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     loadResults();
   }, []);
 
   const loadResults = async () => {
+    setIsLoading(true);
+    pageOffsetRef.current = 0;
+    setHasMore(true);
     try {
-      const res = await fetch(apiUrl("/api/results"));
+      const res = await fetch(apiUrl(`/api/results?limit=${PAGE_SIZE}&offset=0`));
       if (res.ok) {
         const data: WeldingResult[] = await res.json();
         setResults(data.sort((a, b) => b.timestamp - a.timestamp));
+        pageOffsetRef.current = data.length;
+        setHasMore(data.length === PAGE_SIZE);
       }
     } catch (err) {
       console.error("loadResults error:", err);
@@ -320,6 +335,32 @@ export function WeldingProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   };
+
+  const loadMoreResults = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore) return;
+    loadingMoreRef.current = true;
+    setIsLoadingMore(true);
+    try {
+      const res = await fetch(apiUrl(`/api/results?limit=${PAGE_SIZE}&offset=${pageOffsetRef.current}`));
+      if (res.ok) {
+        const newData: WeldingResult[] = await res.json();
+        if (newData.length > 0) {
+          setResults(prev => {
+            const existingIds = new Set(prev.map(r => r.id));
+            const fresh = newData.filter(r => !existingIds.has(r.id));
+            return [...prev, ...fresh].sort((a, b) => b.timestamp - a.timestamp);
+          });
+          pageOffsetRef.current += newData.length;
+        }
+        setHasMore(newData.length === PAGE_SIZE);
+      }
+    } catch (err) {
+      console.error("loadMoreResults error:", err);
+    } finally {
+      loadingMoreRef.current = false;
+      setIsLoadingMore(false);
+    }
+  }, [hasMore]);
 
   const addResult = useCallback(async (result: WeldingResult) => {
     // 로컬 상태 즉시 반영 (UX용)
@@ -437,8 +478,8 @@ export function WeldingProvider({ children }: { children: ReactNode }) {
   }, [results]);
 
   const value = useMemo(
-    () => ({ results, isLoading, addResult, updatePhotos, deleteResult, getResultById, getUserResults, refreshResults: loadResults, migrateLocalFileUris }),
-    [results, isLoading, addResult, updatePhotos, deleteResult, getResultById, getUserResults, migrateLocalFileUris]
+    () => ({ results, isLoading, isLoadingMore, hasMore, addResult, updatePhotos, deleteResult, getResultById, getUserResults, refreshResults: loadResults, loadMoreResults, migrateLocalFileUris }),
+    [results, isLoading, isLoadingMore, hasMore, addResult, updatePhotos, deleteResult, getResultById, getUserResults, loadMoreResults, migrateLocalFileUris]
   );
 
   return (

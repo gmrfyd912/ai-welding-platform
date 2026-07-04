@@ -167,13 +167,17 @@ export function registerResultsRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/results", async (_req: Request, res: Response) => {
+  app.get("/api/results", async (req: Request, res: Response) => {
+    const limit  = Math.min(Math.max(parseInt(String(req.query.limit  ?? "20"), 10) || 20, 1), 100);
+    const offset = Math.max(parseInt(String(req.query.offset ?? "0"),  10) || 0, 0);
     try {
-      // photo_uri, photos, photo_analyses, laser_analysis, fillet_analysis 등
-      // base64 이미지·대용량 분석 컬럼을 DB 단계부터 제외 → 15MB → ~100KB
+      // 대용량 분석 컬럼(photo_analyses, laser_analysis 등)은 제외,
+      // 갤러리 카드 표시에 필요한 photo_uri/photos 는 포함.
+      // 페이지네이션: ?limit=20&offset=0 (기본값)
       const result = await pool.query(
         `SELECT r.id, r.user_id, r.user_name, r.user_profile_uri,
                 COALESCE(r.user_course_name, u.course_name) AS user_course_name,
+                r.photo_uri, r.photos,
                 r.process, r.process_custom, r.posture, r.posture_custom,
                 r.material, r.material_custom, r.bead_type,
                 r.self_score, r.ai_score, r.grade, r.overall_verdict,
@@ -181,7 +185,9 @@ export function registerResultsRoutes(app: Express): void {
                 r.timestamp, r.is_fillet
          FROM weld_results r
          LEFT JOIN weld_users u ON r.user_id = u.id
-         ORDER BY r.timestamp DESC`
+         ORDER BY r.timestamp DESC
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
       );
       res.json(result.rows.map(rowToResultLite));
     } catch (err) {

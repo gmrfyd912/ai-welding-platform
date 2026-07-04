@@ -6,6 +6,7 @@ import {
   FlatList,
   Pressable,
   Image,
+  ActivityIndicator,
   Platform,
   Modal,
 } from "react-native";
@@ -233,7 +234,7 @@ function RankCard({ item, index, onPress, tFn }: { item: UserRank; index: number
 
 export default function RankingScreen() {
   const insets = useSafeAreaInsets();
-  const { results } = useWelding();
+  const { results, isLoadingMore, hasMore, loadMoreResults } = useWelding();
 
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<RankTab>("total");
@@ -397,6 +398,13 @@ export default function RankingScreen() {
             }}
           />
         )}
+        onEndReached={hasMore ? loadMoreResults : undefined}
+        onEndReachedThreshold={0.3}
+        ListFooterComponent={
+          isLoadingMore
+            ? <ActivityIndicator color="#4A9EFF" style={{ paddingVertical: 20 }} />
+            : null
+        }
         showsVerticalScrollIndicator={false}
       />
 
