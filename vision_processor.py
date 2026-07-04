@@ -521,15 +521,14 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         else:
             _expected_center_y = bead_center_y
 
-        # ── [5c단계] 레이저 평탄면 기준 Y (median 기반) ────────────────────────
-        # _baseline_y()가 이미지 최하단(Y=3958 등)을 반환하는 오류를 대체.
-        # flat_ys = 비드 영역 밖 수평선 Y 좌표 → 실제 평탄 철판 레이저 위치.
-        if flat_ys:
-            _flat_median_y = float(np.median(flat_ys))
-        else:
-            _all_h_cy = [cy for (cy, cx, x1, y1, x2, y2, length) in h_lines]
-            _flat_median_y = float(np.median(_all_h_cy)) if _all_h_cy else float(bead_center_y)
-        print(f"[LaserGrid] 평탄면 기준 Y(median): {_flat_median_y:.0f}px (flat_ys={len(flat_ys)}개 기반)")
+        # ── [5c단계] 전체 레이저 기준 Y (global median 기반) ─────────────────
+        # flat_ys(비드 외부선만)의 median은 비드 위 선들보다 Y가 더 작아
+        # deform_px = baseline_y - actual_y 가 음수가 되는 오류를 유발.
+        # 전체 h_lines(비드 포함)의 중간 Y 중앙값을 사용하면:
+        #   비드 위 라인(actual_y 더 작음) < global_median_y → deform_px 양수 보장.
+        _all_h_mid_ys = [(y1 + y2) / 2.0 for (cy, cx, x1, y1, x2, y2, length) in h_lines]
+        global_median_y = float(np.median(_all_h_mid_ys)) if _all_h_mid_ys else float(bead_center_y)
+        print(f"[LaserGrid] 전체 레이저 기준 Y(global_median): {global_median_y:.0f}px (h_lines={len(h_lines)}개 기반)")
 
         # ── [6단계] 구간별 변위 측정 ──────────────────────────────────────────
         bead_h_lines = [
@@ -566,8 +565,8 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             actual_y  = float(np.median(seg_ys))
             # 기준선(Toe 연결선 또는 외삽 y)에서 얼마나 위(작은 y)로 이동했는지
             # 볼록 비드 → actual_y < baseline_y → deform_px > 0 → 높이 양수
-            # 평탄면 레이저 중앙값을 바닥 기준으로 사용 (_baseline_y() 오류 대체)
-            baseline_y = _flat_median_y
+            # 전체 h_lines 중간 Y 중앙값을 바닥 기준으로 사용
+            baseline_y = global_median_y
             # [안전장치] baseline_y가 actual_y에서 비정상적으로 멀어지는 것을 방지
             # 물리적 최대 허용 높이(8.0mm)를 현재 PPM 기준 픽셀로 변환하여 동적 적용
             _MAX_DEFORM_PX = 8.0 * ppm_used
@@ -618,7 +617,6 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
             if use_toe_baseline:
                 h_mm = max(0.0, h_mm)  # 볼록 비드: 음수 방지 (상한은 PPM 수식이 보장)
-            print(f"[FACT-0mm] actual_y: {actual_y} | baseline_y: {_flat_median_y} | deform_px: {deform_px} | h_mm: {h_mm}", flush=True)
             heights_mm.append(h_mm)
             profile.append({
                 "x_pct":        x_pct,
@@ -626,7 +624,6 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                 "actual_y_pct": round(actual_y / h_img * 100, 2),
             })
 
-        print(f"[FACT-0mm-RESULT] 총 계산된 h_mm 개수: {len(heights_mm)}", flush=True)
         # ── [9단계] 프로파일 통계 ─────────────────────────────────────────────
         arr       = np.array(heights_mm, dtype=np.float64)
         max_h     = round(float(arr.max()), 2)
