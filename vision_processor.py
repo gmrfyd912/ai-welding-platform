@@ -618,6 +618,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             h_mm    = round(sign * clamped / sin_shooting / ppm_used / tan_angle, 2)
             if use_toe_baseline:
                 h_mm = max(0.0, h_mm)  # 볼록 비드: 음수 방지 (상한은 PPM 수식이 보장)
+            print(f"[FACT-0mm] actual_y: {actual_y} | baseline_y: {_flat_median_y} | deform_px: {deform_px} | h_mm: {h_mm}", flush=True)
             heights_mm.append(h_mm)
             profile.append({
                 "x_pct":        x_pct,
@@ -625,6 +626,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
                 "actual_y_pct": round(actual_y / h_img * 100, 2),
             })
 
+        print(f"[FACT-0mm-RESULT] 총 계산된 h_mm 개수: {len(heights_mm)}", flush=True)
         # ── [9단계] 프로파일 통계 ─────────────────────────────────────────────
         arr       = np.array(heights_mm, dtype=np.float64)
         max_h     = round(float(arr.max()), 2)
