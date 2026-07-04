@@ -557,6 +557,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             # 기준선(Toe 연결선 또는 외삽 y)에서 얼마나 위(작은 y)로 이동했는지
             # 볼록 비드 → actual_y < baseline_y → deform_px > 0 → 높이 양수
             baseline_y = _baseline_y(x_center)
+            print(f"[FACT-CHECK] X: {x_center} | 레이저(actual_y): {actual_y} | 계산된 바닥(baseline_y): {baseline_y} | 순수 픽셀차이: {abs(baseline_y - actual_y)}")
             # [안전장치] baseline_y가 actual_y에서 비정상적으로 멀어지는 것을 방지
             # 물리적 최대 허용 높이(8.0mm)를 현재 PPM 기준 픽셀로 변환하여 동적 적용
             _MAX_DEFORM_PX = 8.0 * ppm_used
