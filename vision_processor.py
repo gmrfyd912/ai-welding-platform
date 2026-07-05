@@ -617,7 +617,12 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             })
 
         # ── [9단계] 프로파일 통계 ─────────────────────────────────────────────
-        arr       = np.array(heights_mm, dtype=np.float64)
+        # 클램프 공식의 물리적 상한(max_deform_px → mm 역변환): 이 값 이상은 안전장치가
+        # 강제로 꽂은 값이므로 실제 비드 높이가 아님 → 통계에서 배제.
+        max_possible_h = abs(round(max_deform_px / sin_shooting / ppm_used / tan_angle, 2))
+        pure_heights   = [h for h in heights_mm if 0.0 < h < max_possible_h]
+        stat_src       = pure_heights if pure_heights else heights_mm
+        arr       = np.array(stat_src, dtype=np.float64)
         max_h     = round(float(arr.max()), 2)
         min_h     = round(float(arr.min()), 2)
         avg_h     = round(float(arr.mean()), 2)
