@@ -1,0 +1,56 @@
+# 빌드 산출물
+node_modules/
+build/
+dist/
+.expo/
+.expo-shared/
+
+# 버전 관리
+.git/
+
+# 캐시 및 임시 파일
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+
+# 환경 변수 (보안)
+.env
+.env.local
+.env.*.local
+
+# 로그
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 에디터 설정
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# 대용량 미디어/데이터
+*.mp4
+*.mov
+*.avi
+*.zip
+*.tar.gz
+*.dmg
+
+# Python 가상환경
+venv/
+.venv/
+env/
+
+# 통합 파일 (참고용, 분석 불필요)
+.replit_integration_files/

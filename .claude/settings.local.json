@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(Test-Path \"E:\\\\ai-welding-platform\\\\app\\\\login.tsx\")",
+      "Bash(Test-Path \"E:\\\\WeldingApp\\\\app\\\\login.tsx\")",
+      "Bash(ls \"C:/Users/82105/Desktop/files/\")",
+      "Read(//c/Users/82105/Desktop/files/**)",
+      "Bash(cp \"C:/Users/82105/Desktop/files/home.tsx\" \"E:/WeldingApp/app/home.tsx\")",
+      "Bash(cp \"C:/Users/82105/Desktop/files/register.tsx\" \"E:/WeldingApp/app/register.tsx\")",
+      "Bash(cp \"C:/Users/82105/Desktop/files/auth-routes.ts\" \"E:/WeldingApp/server/auth-routes.ts\")",
+      "Bash(cp \"C:/Users/82105/Desktop/files/AuthContext.tsx\" \"E:/WeldingApp/context/AuthContext.tsx\")",
+      "Bash(npx expo *)",
+      "Bash(npx tsc *)",
+      "Bash(cp \"C:/Users/82105/Desktop/home.tsx\" \"E:/WeldingApp/app/home.tsx\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const { Pool } = require\\('pg'\\); const pool = new Pool\\({ connectionString: process.env.DATABASE_URL }\\); pool.query\\('SELECT id, username, name, role FROM weld_users LIMIT 5'\\).then\\(r => { console.log\\(JSON.stringify\\(r.rows, null, 2\\)\\); pool.end\\(\\); }\\).catch\\(e => { console.error\\(e.message\\); pool.end\\(\\); }\\);\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const { Pool } = require\\('pg'\\); const pool = new Pool\\({ connectionString: process.env.DATABASE_URL }\\); pool.query\\(\\\\\"SELECT column_name FROM information_schema.columns WHERE table_name = 'weld_users' ORDER BY ordinal_position\\\\\"\\).then\\(r => { console.log\\(JSON.stringify\\(r.rows.map\\(x => x.column_name\\), null, 2\\)\\); pool.end\\(\\); }\\).catch\\(e => { console.error\\(e.message\\); pool.end\\(\\); }\\);\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const { Pool } = require\\('pg'\\); const pool = new Pool\\({ connectionString: process.env.DATABASE_URL }\\); pool.query\\('SELECT id, username, role FROM weld_users LIMIT 5'\\).then\\(r => { console.log\\(JSON.stringify\\(r.rows, null, 2\\)\\); pool.end\\(\\); }\\).catch\\(e => { console.error\\(e.message\\); pool.end\\(\\); }\\);\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\82105\\Desktop"
+    ]
+  }
+}

@@ -9,7 +9,9 @@ import {
   Image,
   Alert,
   Platform,
+  Modal,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,60 +31,98 @@ const ROLE_KEYS: Record<UserRole, string> = {
   "관리자": "role_admin",
 };
 
-// 날짜 포맷 헬퍼 (YYYY-MM-DD → YYYY.MM.DD 표시)
-function formatDisplay(dateStr: string) {
-  if (!dateStr) return "";
-  return dateStr.replace(/-/g, ".");
+function toDateStr(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-// 간단한 날짜 입력 컴포넌트 (텍스트 입력 방식, YYYY-MM-DD)
-function DateInput({
+function DatePickerInput({
   label,
   value,
   onChange,
-  required,
+  minimumDate,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  required?: boolean;
+  minimumDate?: Date;
 }) {
-  const [raw, setRaw] = useState(value);
+  const [showPicker, setShowPicker] = useState(false);
+  const [tempDate, setTempDate] = useState<Date>(value ? new Date(value) : new Date());
 
-  const handleChange = (text: string) => {
-    // 숫자만 추출
-    const nums = text.replace(/\D/g, "").slice(0, 8);
-    let formatted = nums;
-    if (nums.length > 4) formatted = nums.slice(0, 4) + "-" + nums.slice(4);
-    if (nums.length > 6) formatted = nums.slice(0, 4) + "-" + nums.slice(4, 6) + "-" + nums.slice(6);
-    setRaw(formatted);
-    if (nums.length === 8) {
-      onChange(formatted);
-    } else {
-      onChange("");
-    }
+  const displayText = value ? value.replace(/-/g, ".") : "날짜 선택";
+
+  const openPicker = () => {
+    setTempDate(value ? new Date(value) : new Date());
+    setShowPicker(true);
   };
 
+  // Android: 단일 이벤트로 바로 확정
+  if (Platform.OS === "android") {
+    return (
+      <View style={dateStyles.wrapper}>
+        <Text style={dateStyles.label}>{label}</Text>
+        <Pressable style={({ pressed }) => [dateStyles.inputRow, pressed && { opacity: 0.75 }]} onPress={openPicker}>
+          <Ionicons name="calendar-outline" size={18} color={Colors.textMuted} style={{ marginRight: 10 }} />
+          <Text style={[dateStyles.displayText, !value && { color: Colors.textMuted }]}>{displayText}</Text>
+          {value
+            ? <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+            : <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />}
+        </Pressable>
+        {showPicker && (
+          <DateTimePicker
+            value={tempDate}
+            mode="date"
+            display="default"
+            minimumDate={minimumDate}
+            onChange={(_, selected) => {
+              setShowPicker(false);
+              if (selected) onChange(toDateStr(selected));
+            }}
+          />
+        )}
+      </View>
+    );
+  }
+
+  // iOS: 모달로 감싸서 확정 버튼 제공
   return (
     <View style={dateStyles.wrapper}>
-      <Text style={dateStyles.label}>
-        {label} {required && <Text style={{ color: Colors.danger }}>*</Text>}
-      </Text>
-      <View style={dateStyles.inputRow}>
+      <Text style={dateStyles.label}>{label}</Text>
+      <Pressable style={({ pressed }) => [dateStyles.inputRow, pressed && { opacity: 0.75 }]} onPress={openPicker}>
         <Ionicons name="calendar-outline" size={18} color={Colors.textMuted} style={{ marginRight: 10 }} />
-        <TextInput
-          style={dateStyles.input}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={Colors.textMuted}
-          value={raw}
-          onChangeText={handleChange}
-          keyboardType="numeric"
-          maxLength={10}
-        />
-        {value ? (
-          <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
-        ) : null}
-      </View>
+        <Text style={[dateStyles.displayText, !value && { color: Colors.textMuted }]}>{displayText}</Text>
+        {value
+          ? <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+          : <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />}
+      </Pressable>
+
+      <Modal visible={showPicker} transparent animationType="slide" onRequestClose={() => setShowPicker(false)}>
+        <Pressable style={dateStyles.modalOverlay} onPress={() => setShowPicker(false)}>
+          <Pressable style={dateStyles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={dateStyles.modalHeader}>
+              <Pressable onPress={() => setShowPicker(false)}>
+                <Text style={dateStyles.modalCancel}>취소</Text>
+              </Pressable>
+              <Text style={dateStyles.modalTitle}>{label}</Text>
+              <Pressable onPress={() => { onChange(toDateStr(tempDate)); setShowPicker(false); }}>
+                <Text style={dateStyles.modalConfirm}>확인</Text>
+              </Pressable>
+            </View>
+            <DateTimePicker
+              value={tempDate}
+              mode="date"
+              display="spinner"
+              minimumDate={minimumDate}
+              locale="ko-KR"
+              onChange={(_, selected) => { if (selected) setTempDate(selected); }}
+              style={{ width: "100%" }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -100,7 +140,32 @@ const dateStyles = StyleSheet.create({
     paddingHorizontal: 16,
     height: 52,
   },
-  input: { flex: 1, color: Colors.text, fontFamily: "Inter_400Regular", fontSize: 15 },
+  displayText: { flex: 1, color: Colors.text, fontFamily: "Inter_400Regular", fontSize: 15 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 32,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  modalTitle: { color: Colors.text, fontFamily: "Inter_600SemiBold", fontSize: 16 },
+  modalCancel: { color: Colors.textMuted, fontFamily: "Inter_400Regular", fontSize: 15 },
+  modalConfirm: { color: Colors.primary, fontFamily: "Inter_600SemiBold", fontSize: 15 },
 });
 
 export default function RegisterScreen() {
@@ -335,22 +400,21 @@ export default function RegisterScreen() {
             <Text style={styles.sectionLabel}>교육 기간 <Text style={styles.required}>*</Text></Text>
             <View style={styles.dateRow}>
               <View style={{ flex: 1 }}>
-                <DateInput
+                <DatePickerInput
                   label="입교일"
                   value={enrollDate}
                   onChange={setEnrollDate}
-                  required
                 />
               </View>
               <View style={styles.dateSeparator}>
                 <Ionicons name="arrow-forward" size={16} color={Colors.textMuted} />
               </View>
               <View style={{ flex: 1 }}>
-                <DateInput
+                <DatePickerInput
                   label="수료일"
                   value={graduateDate}
                   onChange={setGraduateDate}
-                  required
+                  minimumDate={enrollDate ? new Date(new Date(enrollDate).getTime() + 86400000) : undefined}
                 />
               </View>
             </View>

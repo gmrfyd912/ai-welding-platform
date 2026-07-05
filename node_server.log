@@ -1,0 +1,16 @@
+[WeldAnalysis] FastAPI endpoint = http://127.0.0.1:8080
+[field-routes] FastAPI 주소: http://127.0.0.1:8080
+Serving static Expo files with dynamic manifest routing
+Expo routing: Checking expo-platform header on / and /manifest
+[field-routes] 라우트 등록 시작
+[field-routes] POST /api/field/analysis 라우트 등록 중 (multer 포함)
+[field-routes] 라우트 등록 완료: /api/field/* (analysis, seed, dashboard, users, records, inspections, defects)
+express server serving on port 5001
+[field-routes] ⚠ FastAPI 미응답: http://127.0.0.1:8080
+[field-routes]   원인: The operation was aborted due to timeout
+[field-routes]   비전 분석 기능이 동작하지 않습니다.
+[field-routes]   해결: npm run dev:all 로 FastAPI와 Node.js를 함께 시작하세요.
+[field/clear] 검사 데이터 전체 삭제 완료
+DELETE /api/field/clear 200 in 232ms :: {"ok":true,"message":"모든 검사 데이터가 삭제되었습니…
+GET /api/field/dashboard/summary 200 in 376ms :: {"totals":{"total_inspections"…
+^C
