@@ -6,7 +6,11 @@ const largeBodyParser = express.json({ limit: "30mb" });
 
 // FASTAPI_URL 환경 변수로 FastAPI 주소를 외부 구성 가능 (Render 등 배포 환경 대응)
 // 기본값을 127.0.0.1로 사용 — Node 18+ 에서 localhost가 IPv6(::1)로 해석될 때 ECONNREFUSED 방지
-const FASTAPI_BASE = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+// Render fromService(property: host)는 프로토콜 없는 hostname만 반환하므로 https:// 자동 보완
+const _rawFastapiUrl = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+const FASTAPI_BASE = _rawFastapiUrl.startsWith("http")
+  ? _rawFastapiUrl
+  : `https://${_rawFastapiUrl}`;
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
 console.log(`[WeldAnalysis] FastAPI endpoint = ${FASTAPI_BASE}`);
 
@@ -122,6 +126,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
 
     const imgSizeKB = Math.round(frontPhoto.length * 0.75 / 1024);
     console.log(`[analyze-weld] 요청 수신 | 이미지크기=${imgSizeKB}KB | 공정=${process} | AI모델=${aiModel}`);
+    console.log(`[analyze-weld] ▶ 호출 시도 URL: ${FASTAPI_BASE}/analyze-welding`);
 
     try {
       // 1) 관리자 피드백 (DB) → FastAPI에 전달
@@ -215,12 +220,13 @@ export function registerWeldAnalysisRoute(app: Express): void {
       const isFetchFailed = err.message?.includes("fetch failed") || err.message?.includes("ECONNREFUSED");
       const isTimeout    = err.message?.includes("AbortError") || err.name === "AbortError";
       console.error(`[analyze-weld] ══ 최종 실패 ══`);
-      console.error(`[analyze-weld]  메시지  : ${err.message}`);
-      console.error(`[analyze-weld]  HTTP상태 : ${err?.status ?? "N/A"}`);
-      console.error(`[analyze-weld]  응답본문 : ${err?.body?.slice(0, 300) ?? "N/A"}`);
-      console.error(`[analyze-weld]  FastAPI  : ${FASTAPI_BASE}/analyze-welding`);
+      console.error(`[analyze-weld]  호출 시도 URL : ${FASTAPI_BASE}/analyze-welding`);
+      console.error(`[analyze-weld]  오류 메시지   : ${err.message}`);
+      console.error(`[analyze-weld]  HTTP 상태     : ${err?.status ?? "N/A"}`);
+      console.error(`[analyze-weld]  응답 본문     : ${err?.body?.slice(0, 300) ?? "N/A"}`);
       if (isFetchFailed) {
-        console.error(`[analyze-weld]  → FastAPI 프로세스가 실행 중인지 확인 (포트 ${FASTAPI_BASE})`);
+        console.error(`[analyze-weld]  → ECONNREFUSED/fetch failed — FastAPI 서비스가 기동 중인지 확인`);
+        console.error(`[analyze-weld]  → Render 배포 여부: FASTAPI_URL 환경변수 = ${process.env.FASTAPI_URL ?? "(미설정 — 127.0.0.1:8080 폴백)"}`);
       }
       if (isTimeout) {
         console.error(`[analyze-weld]  → ${FASTAPI_TIMEOUT_MS / 1000}초 타임아웃 초과 — FastAPI 처리 지연`);

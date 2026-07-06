@@ -1,0 +1,73 @@
+services:
+  # ────────────────────────────────────────────────────────────────────────
+  # [A] FastAPI Python 비전 분석 서비스
+  #     - 무료 티어 (512 MB RAM)
+  #     - opencv-python-headless 사용으로 GUI 의존성 제거 → 메모리 절약
+  #     - 빌드: pip install -r requirements.txt
+  #     - 시작: uvicorn이 $PORT 환경변수로 포트를 자동 수신
+  # ────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: weld-vision-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /docs
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      # 아래 값들은 Render 대시보드 → Environment에서 직접 입력 (git에 노출되지 않음)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ROBOFLOW_API_KEY
+        sync: false
+      - key: ROBOFLOW_MODEL_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+  # ────────────────────────────────────────────────────────────────────────
+  # [B] Node.js Express API 서버
+  #     - 기존 배포 서비스명 "ai-welding-platform" 유지 → APK URL 변경 불필요
+  #     - FASTAPI_URL 환경변수로 [A] 서비스의 공개 URL을 주입
+  #     - 빌드: npm install(devDeps 포함) → esbuild 번들링
+  #     - 시작: 번들된 server_dist/index.js 실행
+  # ────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: ai-welding-platform
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: "npm install && npm run server:build"
+    startCommand: "npm run server:prod"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # [A] FastAPI 서비스의 공개 HTTPS URL — 프로토콜 포함 전체 URL로 설정
+      # weld-analysis.ts / field-routes.ts 가 이 값을 FASTAPI_BASE 로 사용함
+      - key: FASTAPI_URL
+        value: https://weld-vision-api.onrender.com
+      # 아래 값들은 Render 대시보드 → Environment에서 직접 입력 (git에 노출되지 않음)
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: ROBOFLOW_API_KEY
+        sync: false
+      - key: ROBOFLOW_MODEL_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
