@@ -3,7 +3,6 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "postinstall": "patch-package",
     "expo:dev": "npx expo start",
     "server:dev": "cross-env NODE_ENV=development tsx watch --env-file=.env server/index.ts",
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
@@ -96,7 +95,6 @@
     "drizzle-kit": "^0.31.4",
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
-    "patch-package": "^8.0.0",
     "typescript": "~5.9.2"
   },
   "private": true
