@@ -41,7 +41,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: "npm install && npm run server:build"
+    buildCommand: "npm install --include=dev && npm run server:build"
     startCommand: "npm run server:prod"
     envVars:
       - key: NODE_ENV
