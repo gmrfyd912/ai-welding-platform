@@ -112,7 +112,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
   app.post("/api/analyze-weld", largeBodyParser, async (req: Request, res: Response) => {
     const {
       photos, imageBase64,
-      process, posture, material,
+      process: weldingProcess, posture, material,
       beadType, passType, aiModel,
       previousResultsSummary, plateThickness, pipeOuterDiameterMm,
       language,
@@ -125,7 +125,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
     }
 
     const imgSizeKB = Math.round(frontPhoto.length * 0.75 / 1024);
-    console.log(`[analyze-weld] 요청 수신 | 이미지크기=${imgSizeKB}KB | 공정=${process} | AI모델=${aiModel}`);
+    console.log(`[analyze-weld] 요청 수신 | 이미지크기=${imgSizeKB}KB | 공정=${weldingProcess} | AI모델=${aiModel}`);
     console.log(`[analyze-weld] ▶ 호출 시도 URL: ${FASTAPI_BASE}/analyze-welding`);
 
     try {
@@ -147,7 +147,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
         frontPhoto,
         sidePhoto:    photos?.side,
         backPhoto:    photos?.back,
-        process:      process  || "FCAW",
+        process:      weldingProcess  || "FCAW",
         posture:      posture  || "1G",
         material:     material || "탄소강 평판",
         beadType:     beadType || "위빙 비드",
