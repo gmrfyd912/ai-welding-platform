@@ -3,7 +3,7 @@ import pool from "./db";
 import { ensureOxBankTables } from "./schema";
 
 // ── 초기화: 기존 OX 게임 테이블 + 문제은행/잠금 테이블 ──────────
-async function ensureOxTables(): Promise<void> {
+export async function ensureOxTables(): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS weld_ox_state (
       user_id TEXT PRIMARY KEY,
@@ -29,7 +29,6 @@ async function ensureOxTables(): Promise<void> {
   `);
   await ensureOxBankTables();
 }
-ensureOxTables().catch(console.error);
 
 // ══════════════════════════════════════════════════════════════════
 // 유사도 계산 (외부 패키지 없음 — 순수 TypeScript)

@@ -3,12 +3,11 @@ import pool from "./db";
 
 const BUILD_TOKEN = Date.now().toString();
 
-async function ensurePermissionsColumn() {
+export async function ensurePermissionsColumn() {
   await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS permissions TEXT DEFAULT '[]'`);
 }
-ensurePermissionsColumn().catch(console.error);
 
-async function ensureVisitorTable() {
+export async function ensureVisitorTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS site_visitors (
       visit_date DATE PRIMARY KEY,
@@ -16,21 +15,16 @@ async function ensureVisitorTable() {
     )
   `);
 }
-ensureVisitorTable().catch(console.error);
 
-// 입교일/수료일 컬럼 자동 추가
-async function ensureDateColumns() {
+export async function ensureDateColumns() {
   await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS enroll_date DATE`);
   await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS graduate_date DATE`);
 }
-ensureDateColumns().catch(console.error);
 
-// name 컬럼 자동 추가 (없으면 username으로 채움)
-async function ensureNameColumn() {
+export async function ensureNameColumn() {
   await pool.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS name TEXT`);
   await pool.query(`UPDATE weld_users SET name = username WHERE name IS NULL`);
 }
-ensureNameColumn().catch(console.error);
 
 function rowToUser(u: any) {
   let perms: string[] = [];

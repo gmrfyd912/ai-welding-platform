@@ -10,7 +10,10 @@ import express from "express";
 // server/db.ts
 import { Pool } from "pg";
 var pool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
+  max: 4,
+  idleTimeoutMillis: 1e4,
+  connectionTimeoutMillis: 5e3
 });
 var db_default = pool;
 
@@ -420,7 +423,6 @@ var BUILD_TOKEN = Date.now().toString();
 async function ensurePermissionsColumn() {
   await db_default.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS permissions TEXT DEFAULT '[]'`);
 }
-ensurePermissionsColumn().catch(console.error);
 async function ensureVisitorTable() {
   await db_default.query(`
     CREATE TABLE IF NOT EXISTS site_visitors (
@@ -429,17 +431,14 @@ async function ensureVisitorTable() {
     )
   `);
 }
-ensureVisitorTable().catch(console.error);
 async function ensureDateColumns() {
   await db_default.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS enroll_date DATE`);
   await db_default.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS graduate_date DATE`);
 }
-ensureDateColumns().catch(console.error);
 async function ensureNameColumn() {
   await db_default.query(`ALTER TABLE weld_users ADD COLUMN IF NOT EXISTS name TEXT`);
   await db_default.query(`UPDATE weld_users SET name = username WHERE name IS NULL`);
 }
-ensureNameColumn().catch(console.error);
 function rowToUser(u) {
   let perms = [];
   try {
@@ -806,7 +805,6 @@ async function ensureColumns() {
   await db_default.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS laser_analysis JSONB`);
   await db_default.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS is_fillet BOOLEAN DEFAULT FALSE`);
 }
-ensureColumns().catch(console.error);
 async function backfillMissingPhotoAnalyses() {
   try {
     const fallback = `jsonb_build_object(
@@ -836,7 +834,6 @@ async function backfillMissingPhotoAnalyses() {
     console.error("[Migration] photo_analyses \uBCF4\uC815 \uC2E4\uD328:", err);
   }
 }
-backfillMissingPhotoAnalyses().catch(console.error);
 async function ensureAdminFeedbackTable() {
   await db_default.query(`
     CREATE TABLE IF NOT EXISTS admin_feedback (
@@ -848,7 +845,6 @@ async function ensureAdminFeedbackTable() {
     )
   `);
 }
-ensureAdminFeedbackTable().catch(console.error);
 async function ensureCommentsTable() {
   await db_default.query(`
     CREATE TABLE IF NOT EXISTS weld_comments (
@@ -864,7 +860,6 @@ async function ensureCommentsTable() {
   `);
   await db_default.query(`CREATE INDEX IF NOT EXISTS idx_weld_comments_result_id ON weld_comments(result_id)`);
 }
-ensureCommentsTable().catch(console.error);
 function rowToResult(row) {
   return {
     id: row.id,
@@ -4371,7 +4366,6 @@ async function ensureTheoryTable() {
     `CREATE INDEX IF NOT EXISTS idx_theory_attempts_user_day ON weld_theory_attempts(user_id, day_key)`
   );
 }
-ensureTheoryTable().catch(console.error);
 function getDayKey(date = /* @__PURE__ */ new Date()) {
   try {
     const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -4704,7 +4698,6 @@ async function ensureOxTables() {
   `);
   await ensureOxBankTables();
 }
-ensureOxTables().catch(console.error);
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
@@ -5406,7 +5399,6 @@ async function ensureExamTable() {
     )
   `);
 }
-ensureExamTable().catch(console.error);
 function rowToExam(r) {
   return {
     id: r.id,
@@ -5517,7 +5509,6 @@ async function _fieldFetch(url, options, ms) {
     clearTimeout(t);
   }
 }
-ensureFieldTables().catch(console.error);
 var DUMMY_WELDERS = [
   { name: "\uAE40\uCCA0\uC218", role: "field_worker" },
   { name: "\uC774\uC601\uD76C", role: "field_worker" },
@@ -6182,12 +6173,31 @@ function setupErrorHandler(app2) {
     return res.status(status).json({ message });
   });
 }
+async function initializeDatabase() {
+  log("[DB init] \uC21C\uCC28 DDL \uCD08\uAE30\uD654 \uC2DC\uC791...");
+  await ensurePermissionsColumn();
+  await ensureVisitorTable();
+  await ensureDateColumns();
+  await ensureNameColumn();
+  await ensureColumns();
+  await ensureAdminFeedbackTable();
+  await ensureCommentsTable();
+  await backfillMissingPhotoAnalyses();
+  await ensureExamTable();
+  await ensureFieldTables();
+  await ensureOxTables();
+  await ensureTheoryTable();
+  log("[DB init] \uBAA8\uB4E0 \uD14C\uC774\uBE14 \uAC80\uC99D \uC644\uB8CC (\uCEE4\uB125\uC158 1\uAC1C, \uC21C\uCC28 \uC2E4\uD589)");
+}
 (async () => {
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
   configureExpoAndLanding(app);
   const server = await registerRoutes(app);
+  await initializeDatabase().catch((err) => {
+    console.error("[DB init] \uCD08\uAE30\uD654 \uC911 \uC624\uB958 (\uC11C\uBC84\uB294 \uACC4\uC18D \uAE30\uB3D9):", err);
+  });
   setupErrorHandler(app);
   const basePort = parseInt(process.env.PORT || "5001", 10);
   function tryListen(port, remaining) {

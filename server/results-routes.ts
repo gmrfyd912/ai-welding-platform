@@ -5,7 +5,7 @@ import express from "express";
 
 const largeBodyParser = express.json({ limit: "30mb" });
 
-async function ensureColumns() {
+export async function ensureColumns() {
   await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS user_course_name TEXT`);
   await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS bead_type TEXT`);
   // 필릿·레이저 분석 데이터 영구 저장 컬럼 (DB 없으면 앱 재시작 시 UI 소실됨)
@@ -13,12 +13,11 @@ async function ensureColumns() {
   await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS laser_analysis JSONB`);
   await pool.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS is_fillet BOOLEAN DEFAULT FALSE`);
 }
-ensureColumns().catch(console.error);
 
 // 과거 데이터 보정: 측면/이면 사진 URL은 있는데 분석 데이터가 누락된 행에
 // 빈 분석 엔트리를 채워서 프론트엔드가 "분석중/미업로드" 대신 정확한 메시지를 보여주게 함.
 // 예전 버전 백엔드에서 vision 분석 실패 시 photoAnalyses[view]를 통째로 빠뜨린 버그의 잔재 보정.
-async function backfillMissingPhotoAnalyses() {
+export async function backfillMissingPhotoAnalyses() {
   try {
     const fallback = `jsonb_build_object(
       'beadAnalysis', NULL::jsonb,
@@ -47,9 +46,8 @@ async function backfillMissingPhotoAnalyses() {
     console.error("[Migration] photo_analyses 보정 실패:", err);
   }
 }
-backfillMissingPhotoAnalyses().catch(console.error);
 
-async function ensureAdminFeedbackTable() {
+export async function ensureAdminFeedbackTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_feedback (
       id SERIAL PRIMARY KEY,
@@ -60,9 +58,8 @@ async function ensureAdminFeedbackTable() {
     )
   `);
 }
-ensureAdminFeedbackTable().catch(console.error);
 
-async function ensureCommentsTable() {
+export async function ensureCommentsTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS weld_comments (
       id SERIAL PRIMARY KEY,
@@ -77,7 +74,6 @@ async function ensureCommentsTable() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_weld_comments_result_id ON weld_comments(result_id)`);
 }
-ensureCommentsTable().catch(console.error);
 
 function isValidDisplayUrl(val: any): boolean {
   return typeof val === "string" && (

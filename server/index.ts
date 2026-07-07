@@ -3,6 +3,22 @@ import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  ensurePermissionsColumn,
+  ensureVisitorTable,
+  ensureDateColumns,
+  ensureNameColumn,
+} from "./auth-routes";
+import {
+  ensureColumns,
+  ensureAdminFeedbackTable,
+  ensureCommentsTable,
+  backfillMissingPhotoAnalyses,
+} from "./results-routes";
+import { ensureExamTable } from "./exam-routes";
+import { ensureFieldTables } from "./schema";
+import { ensureOxTables } from "./ox-routes";
+import { ensureTheoryTable } from "./theory-routes";
 
 const app = express();
 const log = console.log;
@@ -226,6 +242,23 @@ function setupErrorHandler(app: express.Application) {
   });
 }
 
+async function initializeDatabase(): Promise<void> {
+  log("[DB init] 순차 DDL 초기화 시작...");
+  await ensurePermissionsColumn();
+  await ensureVisitorTable();
+  await ensureDateColumns();
+  await ensureNameColumn();
+  await ensureColumns();
+  await ensureAdminFeedbackTable();
+  await ensureCommentsTable();
+  await backfillMissingPhotoAnalyses();
+  await ensureExamTable();
+  await ensureFieldTables();
+  await ensureOxTables();
+  await ensureTheoryTable();
+  log("[DB init] 모든 테이블 검증 완료 (커넥션 1개, 순차 실행)");
+}
+
 (async () => {
   setupCors(app);
   setupBodyParsing(app);
@@ -234,6 +267,10 @@ function setupErrorHandler(app: express.Application) {
   configureExpoAndLanding(app);
 
   const server = await registerRoutes(app);
+
+  await initializeDatabase().catch((err) => {
+    console.error("[DB init] 초기화 중 오류 (서버는 계속 기동):", err);
+  });
 
   setupErrorHandler(app);
 

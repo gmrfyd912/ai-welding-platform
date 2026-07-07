@@ -48,8 +48,6 @@ async function _fieldFetch(url: string, options: RequestInit, ms: number) {
   }
 }
 
-// 서버 기동 시 테이블 자동 생성
-ensureFieldTables().catch(console.error);
 
 // ─── 더미 데이터 상수 ────────────────────────────────────────────────────────
 const DUMMY_WELDERS = [

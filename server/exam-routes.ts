@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import pool from "./db";
 
-async function ensureExamTable() {
+export async function ensureExamTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS exam_records (
       id TEXT PRIMARY KEY,
@@ -20,7 +20,6 @@ async function ensureExamTable() {
     )
   `);
 }
-ensureExamTable().catch(console.error);
 
 function rowToExam(r: any) {
   return {

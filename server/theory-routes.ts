@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import pool from "./db";
 import { THEORY_QUESTIONS, type TheoryQuestion } from "../shared/theory-questions";
 
-async function ensureTheoryTable() {
+export async function ensureTheoryTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS weld_theory_attempts (
       id SERIAL PRIMARY KEY,
@@ -21,7 +21,6 @@ async function ensureTheoryTable() {
     `CREATE INDEX IF NOT EXISTS idx_theory_attempts_user_day ON weld_theory_attempts(user_id, day_key)`
   );
 }
-ensureTheoryTable().catch(console.error);
 
 function getDayKey(date = new Date()): string {
   // Korean local day (Asia/Seoul) — gives consistent rollover for KR users
