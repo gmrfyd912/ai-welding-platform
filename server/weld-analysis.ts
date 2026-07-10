@@ -7,12 +7,15 @@ const largeBodyParser = express.json({ limit: "30mb" });
 // FASTAPI_URL 환경 변수로 FastAPI 주소를 외부 구성 가능 (Render 등 배포 환경 대응)
 // 기본값을 127.0.0.1로 사용 — Node 18+ 에서 localhost가 IPv6(::1)로 해석될 때 ECONNREFUSED 방지
 // Render fromService(property: host)는 프로토콜 없는 hostname만 반환하므로 https:// 자동 보완
-const _rawFastapiUrl = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+// 마크다운 링크 형식([url](url)) 오염 방어: 대괄호·소괄호 제거 후 순수 URL만 추출
+const _rawFastapiUrl = (process.env.FASTAPI_URL ?? "http://127.0.0.1:8080")
+  .replace(/[\[\]()]/g, "")
+  .trim();
 const FASTAPI_BASE = _rawFastapiUrl.startsWith("http")
   ? _rawFastapiUrl
   : `https://${_rawFastapiUrl}`;
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
-console.log(`[WeldAnalysis] FastAPI endpoint = ${FASTAPI_BASE}`);
+console.log(`[WeldAnalysis] FastAPI endpoint (sanitized) = ${FASTAPI_BASE}`);
 
 // ── AbortSignal 기반 타임아웃 fetch ─────────────────────────────
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {

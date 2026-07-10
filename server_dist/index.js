@@ -19,10 +19,10 @@ var db_default = pool;
 
 // server/weld-analysis.ts
 var largeBodyParser = express.json({ limit: "30mb" });
-var _rawFastapiUrl = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+var _rawFastapiUrl = (process.env.FASTAPI_URL ?? "http://127.0.0.1:8080").replace(/[\[\]()]/g, "").trim();
 var FASTAPI_BASE = _rawFastapiUrl.startsWith("http") ? _rawFastapiUrl : `https://${_rawFastapiUrl}`;
 var FASTAPI_TIMEOUT_MS = 9e4;
-console.log(`[WeldAnalysis] FastAPI endpoint = ${FASTAPI_BASE}`);
+console.log(`[WeldAnalysis] FastAPI endpoint (sanitized) = ${FASTAPI_BASE}`);
 async function fetchWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -5479,8 +5479,9 @@ function registerExamRoutes(app2) {
 // server/field-routes.ts
 import multer from "multer";
 var upload = multer({ storage: multer.memoryStorage() });
-var _rawFastapiUrl2 = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+var _rawFastapiUrl2 = (process.env.FASTAPI_URL ?? "http://127.0.0.1:8080").replace(/[\[\]()]/g, "").trim();
 var FASTAPI_BASE2 = _rawFastapiUrl2.startsWith("http") ? _rawFastapiUrl2 : `https://${_rawFastapiUrl2}`;
+console.log(`[field-routes] FastAPI endpoint (sanitized) = ${FASTAPI_BASE2}`);
 var ANALYSIS_TIMEOUT_MS = 9e4;
 var IS_RENDER_WITHOUT_FASTAPI = !process.env.FASTAPI_URL && !!process.env.RENDER;
 console.log(

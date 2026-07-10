@@ -6,10 +6,14 @@ import { ensureFieldTables } from "./schema";
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Render fromService(property: host)는 프로토콜 없는 hostname만 반환하므로 https:// 자동 보완
-const _rawFastapiUrl = process.env.FASTAPI_URL ?? "http://127.0.0.1:8080";
+// 마크다운 링크 형식([url](url)) 오염 방어: 대괄호·소괄호 제거 후 순수 URL만 추출
+const _rawFastapiUrl = (process.env.FASTAPI_URL ?? "http://127.0.0.1:8080")
+  .replace(/[\[\]()]/g, "")
+  .trim();
 const FASTAPI_BASE = _rawFastapiUrl.startsWith("http")
   ? _rawFastapiUrl
   : `https://${_rawFastapiUrl}`;
+console.log(`[field-routes] FastAPI endpoint (sanitized) = ${FASTAPI_BASE}`);
 const ANALYSIS_TIMEOUT_MS = 90_000;
 
 // Render 프로덕션 환경(= FastAPI 없음) 여부 감지
