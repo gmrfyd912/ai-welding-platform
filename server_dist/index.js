@@ -157,10 +157,8 @@ function registerWeldAnalysisRoute(app2) {
           break;
         } catch (e) {
           lastErr = e;
-          if (e?.status === 400) {
-            console.warn(`[analyze-weld] \uC0AC\uC6A9\uC790 \uC785\uB825 \uBB38\uC81C (\uC7AC\uC2DC\uB3C4 \uC548 \uD568): ${e.message}`);
-            break;
-          }
+          if (e?.status === 400)
+            throw e;
           console.warn(`[analyze-weld] ${attempt + 1}\uCC28 \uC2DC\uB3C4 \uC2E4\uD328: ${e.message}`);
         }
       }

@@ -189,11 +189,8 @@ export function registerWeldAnalysisRoute(app: Express): void {
           break;
         } catch (e: any) {
           lastErr = e;
-          // 400 = 사용자 입력 문제 (잘못된 사진/마커 미검출) → 재시도 의미 없음
-          if (e?.status === 400) {
-            console.warn(`[analyze-weld] 사용자 입력 문제 (재시도 안 함): ${e.message}`);
-            break;
-          }
+          // 400 = 사용자 입력 오류(ArUco 마커 미검출 등) → 재시도 없이 즉시 외부 catch로 바이패스
+          if (e?.status === 400) throw e;
           console.warn(`[analyze-weld] ${attempt + 1}차 시도 실패: ${e.message}`);
         }
       }
