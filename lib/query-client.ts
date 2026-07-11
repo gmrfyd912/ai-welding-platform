@@ -1,7 +1,7 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-const PRODUCTION_URL = "https://ai-welding-platform.onrender.com";
+const PRODUCTION_URL = "https://ai-welding-platform-zofb.onrender.com";
 
 /**
  * Gets the base URL for the Express API server.

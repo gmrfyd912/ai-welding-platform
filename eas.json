@@ -16,7 +16,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "https://ai-welding-platform.onrender.com"
+        "EXPO_PUBLIC_DOMAIN": "https://ai-welding-platform-zofb.onrender.com"
       }
     },
     "production": {

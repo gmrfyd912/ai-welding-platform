@@ -46,7 +46,7 @@
       [
         "expo-router",
         {
-          "origin": "https://ai-welding-platform.onrender.com"
+          "origin": "https://ai-welding-platform-zofb.onrender.com"
         }
       ],
       "expo-font",
@@ -71,9 +71,9 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiUrl": "https://ai-welding-platform.onrender.com",
+      "apiUrl": "https://ai-welding-platform-zofb.onrender.com",
       "router": {
-        "origin": "https://ai-welding-platform.onrender.com"
+        "origin": "https://ai-welding-platform-zofb.onrender.com"
       },
       "eas": {
         "projectId": "6fd828ae-d379-48cd-91e0-103ed5af8e7e"
