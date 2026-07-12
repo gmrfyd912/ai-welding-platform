@@ -189,8 +189,8 @@ export function registerWeldAnalysisRoute(app: Express): void {
           break;
         } catch (e: any) {
           lastErr = e;
-          // 400 = 사용자 입력 오류(ArUco 마커 미검출 등) → 재시도 없이 즉시 외부 catch로 바이패스
-          if (e?.status === 400) throw e;
+          // 400/422 = 재시도 불필요 (400=사용자 입력 오류, 422=FastAPI 연산 크래시) → 즉시 외부 catch로 바이패스
+          if (e?.status === 400 || e?.status === 422) throw e;
           console.warn(`[analyze-weld] ${attempt + 1}차 시도 실패: ${e.message}`);
         }
       }
@@ -216,6 +216,17 @@ export function registerWeldAnalysisRoute(app: Express): void {
         } catch {}
         console.warn(`[analyze-weld] 잘못된 사진 — 사용자에게 안내: ${userMessage}`);
         return res.status(400).json({ error: code, message: userMessage });
+      }
+      // FastAPI 연산 크래시 (422) — Traceback이 Render 로그에 찍혔으므로 즉시 앱에 알림
+      if (err?.status === 422) {
+        let detail = "분석 연산 중 예기치 않은 오류가 발생했습니다.";
+        try {
+          const parsed = JSON.parse(err.body ?? "{}");
+          if (parsed?.detail) detail = parsed.detail;
+          else if (parsed?.message) detail = parsed.message;
+        } catch {}
+        console.error(`[analyze-weld] FastAPI 연산 오류(422): ${detail}`);
+        return res.status(500).json({ error: "ANALYSIS_FAILED", message: detail });
       }
       const isFetchFailed = err.message?.includes("fetch failed") || err.message?.includes("ECONNREFUSED");
       const isTimeout    = err.message?.includes("AbortError") || err.name === "AbortError";

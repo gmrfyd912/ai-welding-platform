@@ -1,15 +1,39 @@
+"use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
 // server/index.ts
-import express3 from "express";
+var import_express3 = __toESM(require("express"));
 
 // server/routes.ts
-import { createServer } from "http";
+var import_http = require("http");
 
 // server/weld-analysis.ts
-import express from "express";
+var import_express = __toESM(require("express"));
 
 // server/db.ts
-import { Pool } from "pg";
-var pool = new Pool({
+var import_pg = require("pg");
+var pool = new import_pg.Pool({
   connectionString: process.env.DATABASE_URL,
   max: 4,
   idleTimeoutMillis: 1e4,
@@ -18,7 +42,7 @@ var pool = new Pool({
 var db_default = pool;
 
 // server/weld-analysis.ts
-var largeBodyParser = express.json({ limit: "30mb" });
+var largeBodyParser = import_express.default.json({ limit: "30mb" });
 var _rawFastapiUrl = (process.env.FASTAPI_URL ?? "http://127.0.0.1:8080").replace(/[\[\]()]/g, "").trim();
 var FASTAPI_BASE = _rawFastapiUrl.startsWith("http") ? _rawFastapiUrl : `https://${_rawFastapiUrl}`;
 var FASTAPI_TIMEOUT_MS = 9e4;
@@ -157,7 +181,7 @@ function registerWeldAnalysisRoute(app2) {
           break;
         } catch (e) {
           lastErr = e;
-          if (e?.status === 400)
+          if (e?.status === 400 || e?.status === 422)
             throw e;
           console.warn(`[analyze-weld] ${attempt + 1}\uCC28 \uC2DC\uB3C4 \uC2E4\uD328: ${e.message}`);
         }
@@ -184,6 +208,19 @@ function registerWeldAnalysisRoute(app2) {
         }
         console.warn(`[analyze-weld] \uC798\uBABB\uB41C \uC0AC\uC9C4 \u2014 \uC0AC\uC6A9\uC790\uC5D0\uAC8C \uC548\uB0B4: ${userMessage}`);
         return res.status(400).json({ error: code, message: userMessage });
+      }
+      if (err?.status === 422) {
+        let detail = "\uBD84\uC11D \uC5F0\uC0B0 \uC911 \uC608\uAE30\uCE58 \uC54A\uC740 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.";
+        try {
+          const parsed = JSON.parse(err.body ?? "{}");
+          if (parsed?.detail)
+            detail = parsed.detail;
+          else if (parsed?.message)
+            detail = parsed.message;
+        } catch {
+        }
+        console.error(`[analyze-weld] FastAPI \uC5F0\uC0B0 \uC624\uB958(422): ${detail}`);
+        return res.status(500).json({ error: "ANALYSIS_FAILED", message: detail });
       }
       const isFetchFailed = err.message?.includes("fetch failed") || err.message?.includes("ECONNREFUSED");
       const isTimeout = err.message?.includes("AbortError") || err.name === "AbortError";
@@ -716,12 +753,12 @@ function registerAuthRoutes(app2) {
 }
 
 // server/google-drive.ts
-import { google } from "googleapis";
-import { Readable } from "stream";
+var import_googleapis = require("googleapis");
+var import_stream = require("stream");
 var FOLDER_NAME = "HHI_Welding_Photos";
 var cachedFolderId = null;
 function getOAuth2Client() {
-  const client = new google.auth.OAuth2(
+  const client = new import_googleapis.google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     "https://developers.google.com/oauthplayground"
@@ -730,7 +767,7 @@ function getOAuth2Client() {
   return client;
 }
 function getDriveClient() {
-  return google.drive({ version: "v3", auth: getOAuth2Client() });
+  return import_googleapis.google.drive({ version: "v3", auth: getOAuth2Client() });
 }
 async function getOrCreateFolder() {
   if (cachedFolderId)
@@ -772,7 +809,7 @@ async function uploadBase64ToGoogleDrive(base64, fileName) {
     throw folderErr;
   }
   const buffer = Buffer.from(base64, "base64");
-  const stream = Readable.from(buffer);
+  const stream = import_stream.Readable.from(buffer);
   const uploadRes = await drive.files.create({
     requestBody: {
       name: fileName,
@@ -794,8 +831,8 @@ async function uploadBase64ToGoogleDrive(base64, fileName) {
 }
 
 // server/results-routes.ts
-import express2 from "express";
-var largeBodyParser2 = express2.json({ limit: "30mb" });
+var import_express2 = __toESM(require("express"));
+var largeBodyParser2 = import_express2.default.json({ limit: "30mb" });
 async function ensureColumns() {
   await db_default.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS user_course_name TEXT`);
   await db_default.query(`ALTER TABLE weld_results ADD COLUMN IF NOT EXISTS bead_type TEXT`);
@@ -5147,18 +5184,18 @@ function registerOxRoutes(app2) {
 }
 
 // server/coaching-routes.ts
-import path from "path";
-import fs from "fs";
+var import_path2 = __toESM(require("path"));
+var import_fs = __toESM(require("fs"));
 
 // server/replit_integrations/audio/client.ts
-import OpenAI, { toFile } from "openai";
-import { Buffer as Buffer2 } from "node:buffer";
-import { spawn } from "child_process";
-import { writeFile, unlink, readFile } from "fs/promises";
-import { randomUUID } from "crypto";
-import { tmpdir } from "os";
-import { join } from "path";
-var openai = new OpenAI({
+var import_openai = __toESM(require("openai"));
+var import_node_buffer = require("node:buffer");
+var import_child_process = require("child_process");
+var import_promises = require("fs/promises");
+var import_crypto = require("crypto");
+var import_os = require("os");
+var import_path = require("path");
+var openai = new import_openai.default({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
 });
@@ -5173,7 +5210,7 @@ async function textToSpeech(text, voice = "alloy", format = "wav") {
     ]
   });
   const audioData = response.choices[0]?.message?.audio?.data ?? "";
-  return Buffer2.from(audioData, "base64");
+  return import_node_buffer.Buffer.from(audioData, "base64");
 }
 
 // server/coaching-routes.ts
@@ -5218,13 +5255,13 @@ Always tailor the message to what is genuinely visible in THIS frame. NEVER outp
 function registerCoachingRoutes(app2) {
   app2.get("/coaching-live.html", (_req, res) => {
     try {
-      const p = path.resolve(
+      const p = import_path2.default.resolve(
         process.cwd(),
         "server",
         "templates",
         "coaching-live.html"
       );
-      const html = fs.readFileSync(p, "utf-8");
+      const html = import_fs.default.readFileSync(p, "utf-8");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Permissions-Policy", "camera=(self), microphone=(self)");
@@ -5475,8 +5512,8 @@ function registerExamRoutes(app2) {
 }
 
 // server/field-routes.ts
-import multer from "multer";
-var upload = multer({ storage: multer.memoryStorage() });
+var import_multer = __toESM(require("multer"));
+var upload = (0, import_multer.default)({ storage: import_multer.default.memoryStorage() });
 var _rawFastapiUrl2 = (process.env.FASTAPI_URL ?? "http://127.0.0.1:8080").replace(/[\[\]()]/g, "").trim();
 var FASTAPI_BASE2 = _rawFastapiUrl2.startsWith("http") ? _rawFastapiUrl2 : `https://${_rawFastapiUrl2}`;
 console.log(`[field-routes] FastAPI endpoint (sanitized) = ${FASTAPI_BASE2}`);
@@ -6008,13 +6045,13 @@ async function registerRoutes(app2) {
   registerWeldAnalysisRoute(app2);
   registerExamRoutes(app2);
   registerFieldRoutes(app2);
-  return createServer(app2);
+  return (0, import_http.createServer)(app2);
 }
 
 // server/index.ts
-import * as fs2 from "fs";
-import * as path2 from "path";
-var app = express3();
+var fs2 = __toESM(require("fs"));
+var path2 = __toESM(require("path"));
+var app = (0, import_express3.default)();
 var log = console.log;
 function setupCors(app2) {
   app2.use((req, res, next) => {
@@ -6046,14 +6083,14 @@ function setupCors(app2) {
 }
 function setupBodyParsing(app2) {
   app2.use(
-    express3.json({
+    import_express3.default.json({
       limit: "50mb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       }
     })
   );
-  app2.use(express3.urlencoded({ extended: false, limit: "50mb" }));
+  app2.use(import_express3.default.urlencoded({ extended: false, limit: "50mb" }));
 }
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
@@ -6156,8 +6193,8 @@ function configureExpoAndLanding(app2) {
     }
     next();
   });
-  app2.use("/assets", express3.static(path2.resolve(process.cwd(), "assets")));
-  app2.use(express3.static(path2.resolve(process.cwd(), "static-build")));
+  app2.use("/assets", import_express3.default.static(path2.resolve(process.cwd(), "assets")));
+  app2.use(import_express3.default.static(path2.resolve(process.cwd(), "static-build")));
   log("Expo routing: Checking expo-platform header on / and /manifest");
 }
 function setupErrorHandler(app2) {

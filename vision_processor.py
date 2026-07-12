@@ -159,25 +159,29 @@ def estimate_bead_robust(width_profile_samples: list, ppm: float) -> list:
     """
     if not width_profile_samples:
         return []
+    try:
+        xs = np.array([p["x_pct"] for p in width_profile_samples], dtype=np.float64)
+        ws = np.array([p["width_mm"] for p in width_profile_samples], dtype=np.float64)
 
-    xs = np.array([p["x_pct"] for p in width_profile_samples], dtype=np.float64)
-    ws = np.array([p["width_mm"] for p in width_profile_samples], dtype=np.float64)
+        # IRLS Huber polyfit: 이상치 억제된 너비 기준선 추출
+        degree = min(2, max(1, len(xs) - 1))
+        coeffs = _robust_polyfit(xs, ws, degree=degree, n_iter=4)
 
-    # IRLS Huber polyfit: 이상치 억제된 너비 기준선 추출
-    degree = min(2, max(1, len(xs) - 1))
-    coeffs = _robust_polyfit(xs, ws, degree=degree, n_iter=4)
+        result = []
+        for p in width_profile_samples:
+            x_pct = p["x_pct"]
+            if coeffs is not None:
+                w_smooth = max(0.0, float(np.poly1d(coeffs)(x_pct)))
+            else:
+                w_smooth = max(0.0, p["width_mm"])
+            est_h = round(w_smooth * _BEAD_GEOM_FACTOR, 3)
+            result.append({"x_pct": x_pct, "est_height_mm": est_h})
 
-    result = []
-    for p in width_profile_samples:
-        x_pct = p["x_pct"]
-        if coeffs is not None:
-            w_smooth = max(0.0, float(np.poly1d(coeffs)(x_pct)))
-        else:
-            w_smooth = max(0.0, p["width_mm"])
-        est_h = round(w_smooth * _BEAD_GEOM_FACTOR, 3)
-        result.append({"x_pct": x_pct, "est_height_mm": est_h})
-
-    return result
+        return result
+    except Exception as e:
+        print(f"\033[91m[estimate_bead_robust] 예외: {e}\033[0m")
+        import traceback; traceback.print_exc()
+        return []
 
 
 def fuse_and_validate(

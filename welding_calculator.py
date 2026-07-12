@@ -168,92 +168,110 @@ def calculate_weld_score(
     is_fillet: bool = False,
     fillet_result: dict | None = None,
 ):
-    # ── 공통: 결함 목록 수집 및 감점 계산 ────────────────────────────
-    front_defects = list(vision_data.get('defects_info', []))
-    back_defects  = list(back_vision_data.get('defects_info', [])) if back_vision_data else []
-    for d in front_defects: d.setdefault('source', 'front')
-    for d in back_defects:  d.setdefault('source', 'back')
-    combined_defects = _dedup_defects(front_defects + back_defects)
-    penalty, defect_list_ko, is_critical_fail = _defect_penalty(combined_defects)
+    try:
+        # ── 공통: 결함 목록 수집 및 감점 계산 ────────────────────────────
+        front_defects = list(vision_data.get('defects_info', []))
+        back_defects  = list(back_vision_data.get('defects_info', [])) if back_vision_data else []
+        for d in front_defects: d.setdefault('source', 'front')
+        for d in back_defects:  d.setdefault('source', 'back')
+        combined_defects = _dedup_defects(front_defects + back_defects)
+        penalty, defect_list_ko, is_critical_fail = _defect_penalty(combined_defects)
 
-    # ── 필릿 용접 채점 분기 ───────────────────────────────────────────
-    if is_fillet and fillet_result and fillet_result.get("status") == "success":
-        fillet_scores = _calculate_fillet_score(fillet_result)
-        fillet_total  = fillet_scores["fillet_total_score"]
-        final_score   = max(0, min(100, fillet_total - penalty))
-        is_pass       = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
+        # ── 필릿 용접 채점 분기 ───────────────────────────────────────────
+        if is_fillet and fillet_result and fillet_result.get("status") == "success":
+            fillet_scores = _calculate_fillet_score(fillet_result)
+            fillet_total  = fillet_scores["fillet_total_score"]
+            final_score   = max(0, min(100, fillet_total - penalty))
+            is_pass       = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
 
-        # 사진별 비드 점수도 계산(탭 표시용)
-        front_bead = calculate_bead_scores_for_photo(vision_data) or {}
-        return {
-            "final_score":   final_score,
-            "is_pass":       is_pass,
-            "bead_total_score":   fillet_total,
-            "width_score":        fillet_scores["leg_score"],
-            "width_variance":     0.0,
-            "straightness_score": fillet_scores["throat_score"],
+            # 사진별 비드 점수도 계산(탭 표시용)
+            front_bead = calculate_bead_scores_for_photo(vision_data) or {}
+            return {
+                "final_score":   final_score,
+                "is_pass":       is_pass,
+                "bead_total_score":   fillet_total,
+                "width_score":        fillet_scores["leg_score"],
+                "width_variance":     0.0,
+                "straightness_score": fillet_scores["throat_score"],
+                "straightness_variance": 0.0,
+                "height_score":       fillet_scores["unequal_score"],
+                "height_variance":    0.0,
+                "detected_defects":   defect_list_ko,
+                "fillet_scores":      fillet_scores,
+                "per_photo_bead": {
+                    "front": front_bead,
+                    "side":  None,
+                    "back":  None,
+                },
+            }
+
+        # ── 맞대기(일반) 용접 채점 ─────────────────────────────────────────
+        # ── 1. 사진별 비드 점수 (정면 / 측면 / 이면 각각 독립 계산) ────────
+        front_bead = calculate_bead_scores_for_photo(vision_data) or {
+            "width_score": 0,
+            "width_variance": 0.0,
+            "straightness_score": 0,
             "straightness_variance": 0.0,
-            "height_score":       fillet_scores["unequal_score"],
-            "height_variance":    0.0,
-            "detected_defects":   defect_list_ko,
-            "fillet_scores":      fillet_scores,
+            "bead_total_score": 0,
+        }
+        side_bead = calculate_bead_scores_for_photo(side_vision_data) if has_side_photo else None
+        back_bead = calculate_bead_scores_for_photo(back_vision_data) if back_vision_data else None
+
+        # ── 2. 종합 비드 점수 = 사진별 점수의 평균 ──────────────────────
+        photos_scored = [b for b in (front_bead, side_bead, back_bead) if b is not None and b.get("bead_total_score") is not None]
+        if not photos_scored:
+            photos_scored = [front_bead]  # 안전망
+
+        bead_total_score = int(round(sum(b["bead_total_score"] for b in photos_scored) / len(photos_scored)))
+        avg_width_score = int(round(sum(b["width_score"] for b in photos_scored) / len(photos_scored)))
+        avg_st_score    = int(round(sum(b["straightness_score"] for b in photos_scored) / len(photos_scored)))
+        avg_width_var   = round(sum(b["width_variance"] for b in photos_scored) / len(photos_scored), 2)
+        avg_st_var      = round(sum(b["straightness_variance"] for b in photos_scored) / len(photos_scored), 2)
+
+        # 측면 사진의 비드 폭 변동을 "비드 높이 변동"으로 해석 (관행) — 백워드 호환용
+        height_score = None
+        height_variance = 0.0
+        if side_bead is not None:
+            height_variance = side_bead["width_variance"]
+            height_score = side_bead["width_score"]
+
+        # ── 3. 결함 감점 (공통 처리에서 이미 계산됨) ─────────────────────
+        final_score = max(0, min(100, bead_total_score - penalty))
+        is_pass = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
+
+        return {
+            "final_score": final_score,
+            "is_pass": is_pass,
+            # 종합 (모든 사진 평균)
+            "bead_total_score": bead_total_score,
+            "width_score": avg_width_score,
+            "width_variance": avg_width_var,
+            "straightness_score": avg_st_score,
+            "straightness_variance": avg_st_var,
+            "height_score": height_score,
+            "height_variance": round(height_variance, 2),
+            "detected_defects": defect_list_ko,
+            # 사진별 — 탭 표시용
             "per_photo_bead": {
                 "front": front_bead,
-                "side":  None,
-                "back":  None,
+                "side":  side_bead,
+                "back":  back_bead,
             },
         }
-
-    # ── 맞대기(일반) 용접 채점 ─────────────────────────────────────────
-    # ── 1. 사진별 비드 점수 (정면 / 측면 / 이면 각각 독립 계산) ────────
-    front_bead = calculate_bead_scores_for_photo(vision_data) or {
-        "width_score": 0,
-        "width_variance": 0.0,
-        "straightness_score": 0,
-        "straightness_variance": 0.0,
-        "bead_total_score": 0,
-    }
-    side_bead = calculate_bead_scores_for_photo(side_vision_data) if has_side_photo else None
-    back_bead = calculate_bead_scores_for_photo(back_vision_data) if back_vision_data else None
-
-    # ── 2. 종합 비드 점수 = 사진별 점수의 평균 ──────────────────────
-    photos_scored = [b for b in (front_bead, side_bead, back_bead) if b is not None and b.get("bead_total_score") is not None]
-    if not photos_scored:
-        photos_scored = [front_bead]  # 안전망
-
-    bead_total_score = int(round(sum(b["bead_total_score"] for b in photos_scored) / len(photos_scored)))
-    avg_width_score = int(round(sum(b["width_score"] for b in photos_scored) / len(photos_scored)))
-    avg_st_score    = int(round(sum(b["straightness_score"] for b in photos_scored) / len(photos_scored)))
-    avg_width_var   = round(sum(b["width_variance"] for b in photos_scored) / len(photos_scored), 2)
-    avg_st_var      = round(sum(b["straightness_variance"] for b in photos_scored) / len(photos_scored), 2)
-
-    # 측면 사진의 비드 폭 변동을 "비드 높이 변동"으로 해석 (관행) — 백워드 호환용
-    height_score = None
-    height_variance = 0.0
-    if side_bead is not None:
-        height_variance = side_bead["width_variance"]
-        height_score = side_bead["width_score"]
-
-    # ── 3. 결함 감점 (공통 처리에서 이미 계산됨) ─────────────────────
-    final_score = max(0, min(100, bead_total_score - penalty))
-    is_pass = "FAIL" if (is_critical_fail or final_score < 70) else "PASS"
-
-    return {
-        "final_score": final_score,
-        "is_pass": is_pass,
-        # 종합 (모든 사진 평균)
-        "bead_total_score": bead_total_score,
-        "width_score": avg_width_score,
-        "width_variance": avg_width_var,
-        "straightness_score": avg_st_score,
-        "straightness_variance": avg_st_var,
-        "height_score": height_score,
-        "height_variance": round(height_variance, 2),
-        "detected_defects": defect_list_ko,
-        # 사진별 — 탭 표시용
-        "per_photo_bead": {
-            "front": front_bead,
-            "side":  side_bead,
-            "back":  back_bead,
-        },
-    }
+    except Exception as e:
+        import traceback
+        print(f"\033[91m[calculate_weld_score] 예외: {e}\033[0m")
+        traceback.print_exc()
+        return {
+            "final_score": 0,
+            "is_pass": "FAIL",
+            "bead_total_score": 0,
+            "width_score": 0,
+            "width_variance": 0.0,
+            "straightness_score": 0,
+            "straightness_variance": 0.0,
+            "height_score": None,
+            "height_variance": 0.0,
+            "detected_defects": [],
+            "per_photo_bead": {"front": None, "side": None, "back": None},
+        }

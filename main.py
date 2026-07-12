@@ -663,6 +663,50 @@ async def analyze_welding_full(
     shooting_angle_deg: str = Form("45"),
     analysis_mode: str = Form("ai"),
 ):
+    try:
+        return await _analyze_welding_impl(
+            file=file, side_file=side_file, back_file=back_file,
+            process=process, posture=posture, material=material,
+            bead_type=bead_type, pass_type=pass_type, ai_model=ai_model,
+            admin_feedback=admin_feedback, user_history=user_history,
+            measurement_context=measurement_context,
+            plate_thickness=plate_thickness,
+            pipe_outer_diameter_mm=pipe_outer_diameter_mm,
+            language=language, is_fillet=is_fillet, has_laser=has_laser,
+            laser_angle_deg=laser_angle_deg, shooting_angle_deg=shooting_angle_deg,
+            analysis_mode=analysis_mode,
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=422, content={
+            "error": "ANALYSIS_FAILED",
+            "message": "연산 중 오류가 발생했습니다.",
+            "detail": str(e),
+        })
+
+
+async def _analyze_welding_impl(
+    file: UploadFile,
+    side_file: Optional[UploadFile],
+    back_file: Optional[UploadFile],
+    process: str,
+    posture: str,
+    material: str,
+    bead_type: str,
+    pass_type: str,
+    ai_model: str,
+    admin_feedback: str,
+    user_history: str,
+    measurement_context: str,
+    plate_thickness: str,
+    pipe_outer_diameter_mm: str,
+    language: str,
+    is_fillet: str,
+    has_laser: str,
+    laser_angle_deg: str,
+    shooting_angle_deg: str,
+    analysis_mode: str,
+):
     # Map language code → human-readable name for the AI prompt
     LANG_NAMES_FOR_AI = {
         "ko": "Korean", "en": "English", "vi": "Vietnamese",
