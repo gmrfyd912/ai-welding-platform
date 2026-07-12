@@ -184,7 +184,7 @@ export default function RegisterPhotoScreen() {
     try {
       const manipResult = await ImageManipulator.manipulateAsync(
         uri,
-        [],
+        [{ resize: { width: 1920 } }],
         { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
       );
       // 정규화된 URI에서 base64 읽기 (base64 옵션 없이 더 호환성 높음)
