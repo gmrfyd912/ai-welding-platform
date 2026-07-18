@@ -233,7 +233,7 @@ export function registerWeldAnalysisRoute(app: Express): void {
         // Render 무료 티어 콜드 스타트 최대 약 60초 → 10s × 5회 = 50s 커버.
         // 400·422·AbortError 등 비-콜드스타트 에러는 즉시 상위 catch로 전파(Fail-fast 유지).
         // 각 대기 전·후에 clientAbort 상태를 확인해 좀비 프로세스를 방지.
-        const COLD_START_RETRIES  = 4;       // 최대 4회 (이전 5회에서 하향)
+        const COLD_START_RETRIES  = 5;       // 최대 5회 (콜드 스타트 커버리지 30s→37s)
         const COLD_START_DELAY_MS = 7_000;  // 7s (이전 10s에서 단축) → 최대 대기 28s
 
         let result: any   = null;
