@@ -17,15 +17,35 @@ const FASTAPI_BASE = _rawFastapiUrl.startsWith("http")
 const FASTAPI_TIMEOUT_MS = 90_000; // 90초 타임아웃
 console.log(`[WeldAnalysis] FastAPI endpoint (sanitized) = ${FASTAPI_BASE}`);
 
-// ── AbortSignal 기반 타임아웃 fetch ─────────────────────────────
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
+// ── AbortSignal 기반 타임아웃 fetch (클라이언트 연결 해제 시 즉시 중단) ────
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+  parentSignal?: AbortSignal,
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  // 부모 신호(클라이언트 연결 종료)를 전파: 클라이언트가 끊기면 FastAPI 호출도 즉시 중단
+  let parentListener: (() => void) | undefined;
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      clearTimeout(timer);
+      controller.abort();
+    } else {
+      parentListener = () => controller.abort();
+      parentSignal.addEventListener("abort", parentListener, { once: true });
+    }
+  }
+
   try {
-    const resp = await fetch(url, { ...options, signal: controller.signal });
-    return resp;
+    return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    if (parentSignal && parentListener) {
+      parentSignal.removeEventListener("abort", parentListener);
+    }
   }
 }
 
@@ -52,6 +72,7 @@ async function callFastApiAnalyze(params: {
   hasLaser?:         boolean;
   laserAngleDeg?:    string;
   shootingAngleDeg?: string;
+  parentSignal?:     AbortSignal; // 클라이언트 연결 해제 시 fetch 즉시 중단용
 }): Promise<any> {
   const formData = new FormData();
 
@@ -95,6 +116,7 @@ async function callFastApiAnalyze(params: {
     `${FASTAPI_BASE}/analyze-welding`,
     { method: "POST", body: formData },
     FASTAPI_TIMEOUT_MS,
+    params.parentSignal,
   );
 
   if (!resp.ok) {
@@ -168,41 +190,52 @@ export function registerWeldAnalysisRoute(app: Express): void {
         shootingAngleDeg:  shootingAngle ? String(shootingAngle) : "90",
       };
 
-      // 콜드 스타트 사전 워밍업: FastAPI에 가벼운 ping (실패해도 무시)
+      // ── 클라이언트 연결 해제 감지 (좀비 프로세스 방지) ────────────────
+      // 프론트엔드 AbortController(120s)가 발동하면 res "close" 이벤트 발생.
+      // clientAbort.signal이 abort되면 fetchWithTimeout이 즉시 fetch를 취소함.
+      const clientAbort = new AbortController();
+      const onClientClose = (): void => {
+        if (!clientAbort.signal.aborted) {
+          clientAbort.abort();
+          console.warn("[analyze-weld] 클라이언트 연결 끊김 → FastAPI 호출 즉시 중단");
+        }
+      };
+      res.on("close", onClientClose);
+
       try {
-        await fetchWithTimeout(`${FASTAPI_BASE}/`, { method: "GET" }, 3000);
-      } catch {
-        // 무시 — 본 요청에서 어차피 재시도함
-      }
-
-      const BACKOFFS_MS = [0, 5000, 10000]; // 1차 즉시, 2차 5초 후, 3차 10초 후
-      let result: any = null;
-      let lastErr: any = null;
-      for (let attempt = 0; attempt < BACKOFFS_MS.length; attempt++) {
-        if (BACKOFFS_MS[attempt] > 0) {
-          console.warn(`[analyze-weld] ${attempt}차 실패 → ${BACKOFFS_MS[attempt] / 1000}초 후 재시도...`);
-          await new Promise((r) => setTimeout(r, BACKOFFS_MS[attempt]));
+        // 클라이언트가 이미 없으면 FastAPI 호출 자체를 생략
+        if (clientAbort.signal.aborted || req.socket.destroyed) {
+          console.warn("[analyze-weld] 요청 수신 전 클라이언트 이미 없음 → 처리 생략");
+          return;
         }
+
+        // Fail-fast: 재시도 없음 — 실패 즉시 클라이언트에 반환
+        // (기존 [0, 5000, 10000] 재시도 루프는 좀비 FastAPI 호출 285s를 유발함)
+        let result: any = null;
         try {
-          result = await callFastApiAnalyze(callParams);
-          if (attempt > 0) console.log(`[analyze-weld] ${attempt + 1}차 시도에서 성공`);
-          break;
+          result = await callFastApiAnalyze({ ...callParams, parentSignal: clientAbort.signal });
         } catch (e: any) {
-          lastErr = e;
-          // 400/422 = 재시도 불필요 (400=사용자 입력 오류, 422=FastAPI 연산 크래시) → 즉시 외부 catch로 바이패스
-          if (e?.status === 400 || e?.status === 422) throw e;
-          console.warn(`[analyze-weld] ${attempt + 1}차 시도 실패: ${e.message}`);
+          // 클라이언트가 끊긴 후 abort된 경우 — 조용히 종료
+          if (clientAbort.signal.aborted) {
+            console.warn("[analyze-weld] 클라이언트 끊김으로 인한 abort — 응답 생략");
+            return;
+          }
+          throw e;
         }
+        if (!result) throw new Error("FastAPI 호출 실패 (원인 불명)");
+
+        console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
+
+        if (!clientAbort.signal.aborted) {
+          res.json({
+            ...result,
+            laserAnalysis:  result.visionMeasurement?.laser_analysis ?? null,
+            filletAnalysis: result.filletAnalysis ?? null,
+          });
+        }
+      } finally {
+        res.off("close", onClientClose);
       }
-      if (!result) throw lastErr ?? new Error("FastAPI 호출 실패 (원인 불명)");
-
-      console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
-
-      res.json({
-        ...result,
-        laserAnalysis:  result.visionMeasurement?.laser_analysis ?? null,
-        filletAnalysis: result.filletAnalysis ?? null,
-      });
 
     } catch (err: any) {
       // 사용자 입력 문제 (400) — FastAPI의 사용자 친화 메시지를 그대로 전달

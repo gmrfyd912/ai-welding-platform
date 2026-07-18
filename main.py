@@ -495,32 +495,35 @@ def _inject_marker_fallback(robo_data: dict, aruco_info: dict, label: str) -> di
     return robo_data
 
 
+def _extract_r_channel(image_bytes: bytes) -> bytes:
+    """R채널 분리 전처리 (CPU 바운드 — asyncio.to_thread 전용).
+    이벤트루프 블로킹 없이 Roboflow 전송 전 레이저 소거 이미지 생성.
+    실패 시 원본 bytes 반환 (안전 폴백).
+    """
+    try:
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is not None:
+            _, _, r = cv2.split(img)
+            ok, buf = cv2.imencode(".jpg", cv2.merge([r, r, r]), [cv2.IMWRITE_JPEG_QUALITY, 92])
+            if ok:
+                return bytes(buf.tobytes())
+    except Exception as e:
+        print(f"[R채널 전처리] 실패 (원본 사용): {e}")
+    return image_bytes
+
+
 async def _call_roboflow(image_bytes: bytes, label: str) -> dict:
     """Roboflow 호출 → predictions에 image_width/image_height 주입한 데이터 반환."""
     data = {"predictions": [], "image": {"width": 1000, "height": 1000}}
     if not ROBOFLOW_API_KEY:
         return data
     try:
-        # ── R채널 분리 전처리 (Roboflow 전송 전용 임시 사본) ──────────────
-        # 녹색 격자 레이저(~532nm)는 G채널에 집중: G값≈255, R값≈0.
-        # R채널만 추출하면 레이저가 픽셀을 훼손하지 않고 자연 소거되고,
-        # 용접 비드의 명암·윤곽·형태 정보는 원본 그대로 보존됨.
-        # ⚠️ robo_bytes는 이 함수 내부 임시 사본. 원본 image_bytes(ArUco·
-        #    레이저 분석용)는 변경되지 않으며 호출부에서 그대로 사용됨.
-        robo_bytes = image_bytes
-        try:
-            _arr = np.frombuffer(image_bytes, dtype=np.uint8)
-            _img = cv2.imdecode(_arr, cv2.IMREAD_COLOR)
-            if _img is not None:
-                _, _, _r = cv2.split(_img)
-                _ok, _buf = cv2.imencode(
-                    ".jpg", cv2.merge([_r, _r, _r]),
-                    [cv2.IMWRITE_JPEG_QUALITY, 92],
-                )
-                if _ok:
-                    robo_bytes = bytes(_buf.tobytes())
-        except Exception as _e:
-            print(f"[Roboflow:{label}] R채널 전처리 실패 (원본 전송): {_e}")
+        # ── R채널 분리 전처리: to_thread로 이벤트루프 해제 ───────────────
+        # 녹색 격자 레이저(~532nm)는 G채널에 집중 → R채널만 추출로 자연 소거.
+        # _extract_r_channel 만 스레드 분리: 메모리 ~6MB 단일 사본만 생성하므로
+        # OOM 위험 없음. 전체 파이프라인 to_thread(OOM 유발)와 다름.
+        robo_bytes = await asyncio.to_thread(_extract_r_channel, image_bytes)
         # ─────────────────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=30) as http_client:
             robo_resp = await http_client.post(
