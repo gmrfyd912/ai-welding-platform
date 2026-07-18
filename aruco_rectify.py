@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import gc
 from typing import Optional, Tuple
 import cv2
 import numpy as np
@@ -178,6 +179,8 @@ def rectify_image_with_aruco(image_bytes: bytes) -> Tuple[bytes, dict]:
             borderMode=cv2.BORDER_CONSTANT,
             borderValue=(0, 0, 0),
         )
+        del img  # warpPerspective 완료 → 원본 고해상도 배열 즉시 해제 (OOM 방어)
+        gc.collect()
 
         # 기울기 추정: 마커 상단 변(0→1)이 수평 대비 회전된 각도
         dx = float(corners[1][0] - corners[0][0])

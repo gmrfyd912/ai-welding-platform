@@ -1,3 +1,4 @@
+import gc
 import cv2
 import numpy as np
 import math
@@ -17,16 +18,21 @@ def quick_inpaint_laser(image_bytes: bytes) -> bytes:
     """
     nparr = np.frombuffer(image_bytes, np.uint8)
     img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    del nparr  # frombuffer 뷰 즉시 해제
     if img is None:
         return image_bytes
     h_img, w_img = img.shape[:2]
 
+    # Hough 엣지 검출: gray→blur→edges 체인은 순차 해제하여 동시 점유 최소화
     gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    del gray  # blurred 생성 완료 → gray 즉시 해제
     edges   = cv2.Canny(blurred, 50, 150)
+    del blurred  # edges 생성 완료 → blurred 즉시 해제
     # 현장 사진: 요철·반사로 레이저 선이 끊기므로 임계값 완화
     lines_raw = cv2.HoughLinesP(edges, 1, math.pi / 180, threshold=25,
                                 minLineLength=10, maxLineGap=35)
+    del edges  # HoughLinesP 완료 → edges 즉시 해제
 
     line_mask = np.zeros((h_img, w_img), dtype=np.uint8)
     if lines_raw is not None:
@@ -36,23 +42,33 @@ def quick_inpaint_laser(image_bytes: bytes) -> bytes:
             if angle <= 15 or angle >= 165 or 75 <= angle <= 105:
                 cv2.line(line_mask, (x1, y1), (x2, y2), 255, 4)
 
+    # HSV 색상 마스크: hsv 생성 후 마스크 3장 추출 → hsv 즉시 해제
     hsv        = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     m_green    = cv2.inRange(hsv, np.array([38, 80, 100]),  np.array([90, 255, 255]))
     m_red1     = cv2.inRange(hsv, np.array([0,  80, 100]),  np.array([12, 255, 255]))
     m_red2     = cv2.inRange(hsv, np.array([168, 80, 100]), np.array([180, 255, 255]))
+    del hsv  # 색상 마스크 추출 완료 → hsv 즉시 해제 (OOM 방어: img 와 동시 해제)
     color_mask = cv2.bitwise_or(m_green, cv2.bitwise_or(m_red1, m_red2))
+    del m_green, m_red1, m_red2  # color_mask 생성 완료 → 개별 마스크 즉시 해제
     combined   = cv2.bitwise_or(line_mask, color_mask)
+    del line_mask, color_mask  # combined 생성 완료 → 중간 마스크 즉시 해제
     krnl       = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     combined   = cv2.dilate(combined, krnl, iterations=1)
+    gc.collect()  # 누적 참조 정리 후 Linux 커널에 즉각 메모리 반환
 
     scale = min(1.0, 1024 / max(w_img, 1))
     if scale < 1.0:
         w_s, h_s = int(w_img * scale), int(h_img * scale)
         img_s  = cv2.resize(img,      (w_s, h_s), interpolation=cv2.INTER_AREA)
+        del img  # 리사이즈 완료 → 원본 고해상도 배열 즉시 해제 (핵심 절감)
         mask_s = cv2.resize(combined, (w_s, h_s), interpolation=cv2.INTER_NEAREST)
+        del combined  # 리사이즈 완료 → 고해상도 마스크 즉시 해제
         mask_s = cv2.dilate(mask_s, krnl, iterations=1)
+        gc.collect()
     else:
+        # scale >= 1.0: img_s/mask_s 는 동일 배열의 alias — del 해도 img_s·mask_s 가 참조 유지
         img_s, mask_s = img, combined
+        del img, combined
 
     if cv2.countNonZero(mask_s) > 30:
         clean = cv2.inpaint(img_s, mask_s, inpaintRadius=4, flags=cv2.INPAINT_TELEA)
@@ -312,6 +328,7 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
         _lo_g = np.array([45,  80,  80], dtype=np.uint8)
         _hi_g = np.array([80, 255, 255], dtype=np.uint8)
         laser_mask = cv2.inRange(hsv, _lo_g, _hi_g)
+        del hsv  # laser_mask 추출 완료 → hsv 즉시 해제 (OOM 방어: img 와 동시 점유 해소)
 
         # 형태학적 팽창 2회: 끊어진 레이저 선 조각 연결 (3×3 커널)
         _kern3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -330,7 +347,11 @@ def analyze_laser_grid(image_bytes: bytes, ppm: float,
             print("[LaserGrid] HSV 마스크 부족 → 그레이스케일 Canny 폴백 (상위 50선 제한)")
             _gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             _blurred = cv2.GaussianBlur(_gray, (5, 5), 0)
+            del _gray   # _blurred 생성 완료 → _gray 즉시 해제
             edges    = cv2.Canny(_blurred, 50, 150)
+            del _blurred  # edges 생성 완료 → _blurred 즉시 해제
+        del img  # HSV·Canny 분기 모두 완료 → 원본 고해상도 배열 즉시 해제
+        gc.collect()  # Linux 커널에 즉각 메모리 반환
 
         # ── [2단계] 격자선 검출 (HSV 마스크 기반 → 노이즈 대폭 감소) ──────────
         # HSV 마스크 사용 시 입력이 이미 레이저 선만 남은 이진 이미지이므로

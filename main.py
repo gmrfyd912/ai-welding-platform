@@ -1,4 +1,5 @@
 import os
+import gc
 import math
 import base64
 import asyncio
@@ -503,9 +504,14 @@ def _extract_r_channel(image_bytes: bytes) -> bytes:
     try:
         arr = np.frombuffer(image_bytes, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        del arr  # frombuffer 뷰 즉시 해제 (image_bytes 는 호출자가 관리)
         if img is not None:
-            _, _, r = cv2.split(img)
-            ok, buf = cv2.imencode(".jpg", cv2.merge([r, r, r]), [cv2.IMWRITE_JPEG_QUALITY, 92])
+            b_ch, g_ch, r_ch = cv2.split(img)
+            del img, b_ch, g_ch  # split 직후 원본·미사용 채널 즉시 해제 (OOM 방어)
+            gc.collect()
+            ok, buf = cv2.imencode(".jpg", cv2.merge([r_ch, r_ch, r_ch]),
+                                   [cv2.IMWRITE_JPEG_QUALITY, 92])
+            del r_ch  # 인코딩 완료 후 R채널 해제
             if ok:
                 return bytes(buf.tobytes())
     except Exception as e:
