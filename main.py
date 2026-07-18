@@ -726,7 +726,7 @@ async def _analyze_welding_impl(
 
     # ── 1. 정면 이미지 읽기 + ArUco 원근 보정 ───────────────────
     image_bytes_raw = await file.read()
-    image_bytes, front_aruco = _rectify_for_roboflow(image_bytes_raw, "front")
+    image_bytes, front_aruco = await asyncio.to_thread(_rectify_for_roboflow, image_bytes_raw, "front")
     image_base64    = base64.b64encode(image_bytes).decode()
 
     # ── 1b. 레이저 있는 경우 Roboflow 전 레이저 인페인팅 (clean image → Roboflow) ──
@@ -734,7 +734,7 @@ async def _analyze_welding_impl(
     # Roboflow 오버레이(결함 박스 이미지)에 레이저 그리드가 찍히는 문제를 차단.
     # analyze_bead_dimensions 는 원본(image_bytes)을 계속 사용 → 레이저 높이 계산 정상.
     if has_laser.lower() == "true":
-        robo_image_bytes = quick_inpaint_laser(image_bytes)
+        robo_image_bytes = await asyncio.to_thread(quick_inpaint_laser, image_bytes)
     else:
         robo_image_bytes = image_bytes
 
@@ -747,7 +747,8 @@ async def _analyze_welding_impl(
     aruco_shooting_est = front_aruco.get("shooting_angle_est_deg")
     if aruco_shooting_est:
         print(f"[ArUco:front] 촬영 앵글 추정={aruco_shooting_est:.1f}° (마커 변형비 기반)")
-    vision_data = analyze_bead_dimensions(
+    vision_data = await asyncio.to_thread(
+        analyze_bead_dimensions,
         front_preds,
         is_pipe=is_pipe,
         pipe_outer_diameter_mm=pipe_od_mm,
@@ -768,7 +769,7 @@ async def _analyze_welding_impl(
         except Exception as _fe:
             print(f"[FastAPI] clean_image_base64 폴백 실패: {_fe}")
 
-    fillet_result = calculate_fillet_analysis(vision_data, vision_data.get("ppm", 1), is_fillet_bool)
+    fillet_result = await asyncio.to_thread(calculate_fillet_analysis, vision_data, vision_data.get("ppm", 1), is_fillet_bool)
 
     # 마커/비드 미탐지 시 분석 중단 — 잘못된 사진(풍경·인물·흐릿) 또는
     # 마커 누락 사진을 가짜 기본값으로 분석해 항상 같은 점수를 내는 문제 방지
@@ -793,11 +794,12 @@ async def _analyze_welding_impl(
     has_side_photo   = side_file is not None
     side_vision_data = None
     if has_side_photo:
-        side_bytes, side_aruco = _rectify_for_roboflow(await side_file.read(), "side")
+        side_raw = await side_file.read()
+        side_bytes, side_aruco = await asyncio.to_thread(_rectify_for_roboflow, side_raw, "side")
         side_robo  = await _call_roboflow(side_bytes, "side")
         side_robo  = _inject_marker_fallback(side_robo, side_aruco, "side")
         side_preds = side_robo.get("predictions", [])
-        side_vision_data = analyze_bead_dimensions(side_preds, is_pipe=is_pipe,
+        side_vision_data = await asyncio.to_thread(analyze_bead_dimensions, side_preds, is_pipe=is_pipe,
                                                    pipe_outer_diameter_mm=pipe_od_mm)
         if side_vision_data.get("status") == "error":
             print(f"[Vision:side] 미탐지 - 높이 점수 제외: {side_vision_data.get('message')}")
@@ -809,11 +811,12 @@ async def _analyze_welding_impl(
     back_was_uploaded = back_file is not None  # 사진 자체가 들어왔는지 (분석 성공 여부와 별개)
     back_vision_data = None
     if back_file is not None:
-        back_bytes, back_aruco = _rectify_for_roboflow(await back_file.read(), "back")
+        back_raw = await back_file.read()
+        back_bytes, back_aruco = await asyncio.to_thread(_rectify_for_roboflow, back_raw, "back")
         back_robo  = await _call_roboflow(back_bytes, "back")
         back_robo  = _inject_marker_fallback(back_robo, back_aruco, "back")
         back_preds = back_robo.get("predictions", [])
-        back_vision_data = analyze_bead_dimensions(back_preds, is_pipe=is_pipe,
+        back_vision_data = await asyncio.to_thread(analyze_bead_dimensions, back_preds, is_pipe=is_pipe,
                                                    pipe_outer_diameter_mm=pipe_od_mm)
         if back_vision_data.get("status") == "error":
             print(f"[Vision:back] 미탐지 - 이면 결함 0개로 처리: {back_vision_data.get('message')}")
@@ -823,7 +826,8 @@ async def _analyze_welding_impl(
             print(f"[Vision:back] 이면 결함 {n_back_def}개 검출 - 감점에 합산")
 
     # ── 4. welding_calculator: 새 시그니처로 점수 계산 ──────────────
-    weld_data = calculate_weld_score(
+    weld_data = await asyncio.to_thread(
+        calculate_weld_score,
         vision_data,
         has_side_photo=has_side_photo,
         side_vision_data=side_vision_data,

@@ -236,9 +236,12 @@ export default function RegisterPhotoScreen() {
       stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_detecting")), 1500));
       stageTimers.push(setTimeout(() => setAnalysisStage(t("stage_measuring")), 5000));
 
+      const fetchController = new AbortController();
+      const fetchTimeout = setTimeout(() => fetchController.abort(), 120_000);
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: fetchController.signal,
         body: JSON.stringify({
           photos: { front: frontBase64, side: sideBase64, back: backBase64 },
           process: process === "기타" ? processCustom || process : process,
@@ -257,6 +260,7 @@ export default function RegisterPhotoScreen() {
           plateThickness: plateThickness.trim() || undefined,
         }),
       });
+      clearTimeout(fetchTimeout);
 
       if (!response.ok) {
         let errMsg = `서버 오류: ${response.status}`;
@@ -380,8 +384,9 @@ export default function RegisterPhotoScreen() {
       }
 
       // 사용자에게 보여줄 메시지 안전 추출
-      const userMsg =
-        (typeof errMsg === "string" && errMsg.length > 0 && errMsg.length < 300)
+      const userMsg = errType === "AbortError"
+        ? "분석 시간이 초과되었습니다 (120초). 서버가 재시작 중일 수 있으므로 잠시 후 다시 시도해 주세요."
+        : (typeof errMsg === "string" && errMsg.length > 0 && errMsg.length < 300)
           ? errMsg
           : t("ai_analysisError");
       const looksLikePhotoIssue = /비드|마커|사진|선명|업로드|bead|marker|photo|upload/i.test(userMsg);

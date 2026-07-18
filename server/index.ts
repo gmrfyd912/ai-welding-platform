@@ -297,4 +297,19 @@ async function initializeDatabase(): Promise<void> {
   }
 
   tryListen(basePort, 5);
+
+  // ── FastAPI Keep-alive: Render 무료 티어 15분 스핀다운 방지 ────────────
+  const FASTAPI_URL_FOR_PING = (process.env.FASTAPI_URL || "").trim();
+  if (FASTAPI_URL_FOR_PING) {
+    const pingUrl = FASTAPI_URL_FOR_PING.replace(/\/+$/, "") + "/docs";
+    setInterval(async () => {
+      try {
+        const r = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) });
+        log(`[Keepalive] FastAPI ping → HTTP ${r.status}`);
+      } catch (e: unknown) {
+        log(`[Keepalive] FastAPI ping 실패 (무시): ${(e as Error)?.message ?? e}`);
+      }
+    }, 300_000); // 5분마다
+    log(`[Keepalive] FastAPI 5분 주기 ping 시작: ${pingUrl}`);
+  }
 })();
