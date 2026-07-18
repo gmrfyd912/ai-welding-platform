@@ -298,18 +298,31 @@ async function initializeDatabase(): Promise<void> {
 
   tryListen(basePort, 5);
 
-  // ── FastAPI Keep-alive: Render 무료 티어 15분 스핀다운 방지 ────────────
+  // ── FastAPI Smart Ping: Render 무료 750시간 방어 (평일 주간 전용) ─────────
+  // KST(UTC+9) 기준 평일(월~금) 08:00~19:59 에만 ping → 야간·주말 절전
   const FASTAPI_URL_FOR_PING = (process.env.FASTAPI_URL || "").trim();
   if (FASTAPI_URL_FOR_PING) {
     const pingUrl = FASTAPI_URL_FOR_PING.replace(/\/+$/, "") + "/docs";
     setInterval(async () => {
-      try {
-        const r = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) });
-        log(`[Keepalive] FastAPI ping → HTTP ${r.status}`);
-      } catch (e: unknown) {
-        log(`[Keepalive] FastAPI ping 실패 (무시): ${(e as Error)?.message ?? e}`);
+      const nowUtcMs = Date.now();
+      const kstMs = nowUtcMs + 9 * 60 * 60 * 1000; // UTC+9 오프셋 적용
+      const kstDate = new Date(kstMs);
+      const dayOfWeek = kstDate.getUTCDay();   // 0=일, 1=월 … 6=토
+      const hour = kstDate.getUTCHours();      // getUTCHours() → KST 시(오프셋 이미 반영)
+      const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+      const isDaytime = hour >= 8 && hour < 20; // 08:00 ~ 19:59
+
+      if (isWeekday && isDaytime) {
+        try {
+          const r = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) });
+          log(`[Smart Ping] FastAPI ping → HTTP ${r.status}`);
+        } catch (e: unknown) {
+          log(`[Smart Ping] FastAPI ping 실패 (무시): ${(e as Error)?.message ?? e}`);
+        }
+      } else {
+        log("[Smart Ping] Night/Weekend mode: Skipping ping to save Render free tier hours.");
       }
     }, 300_000); // 5분마다
-    log(`[Keepalive] FastAPI 5분 주기 ping 시작: ${pingUrl}`);
+    log(`[Smart Ping] FastAPI 5분 주기 Smart Ping 시작 (평일 08~20 KST): ${pingUrl}`);
   }
 })();
