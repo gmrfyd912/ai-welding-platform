@@ -525,7 +525,10 @@ async def _call_roboflow(image_bytes: bytes, label: str) -> dict:
         # OOM 위험 없음. 전체 파이프라인 to_thread(OOM 유발)와 다름.
         robo_bytes = await asyncio.to_thread(_extract_r_channel, image_bytes)
         # ─────────────────────────────────────────────────────────────────
-        async with httpx.AsyncClient(timeout=30) as http_client:
+        # httpx Timeout 명시: 단일 숫자(30)는 phase별 각 30s → 실제 최대 60s 가능.
+        # connect/write는 짧게(5s), read(Roboflow 응답 본문)에만 25s 부여 → 총 최대 35s.
+        _robo_timeout = httpx.Timeout(connect=5.0, read=25.0, write=5.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=_robo_timeout) as http_client:
             robo_resp = await http_client.post(
                 f"https://detect.roboflow.com/{ROBOFLOW_MODEL}?api_key={ROBOFLOW_API_KEY}&confidence={ROBOFLOW_CONF}&overlap={ROBOFLOW_OVERLAP}",
                 files={"file": ("image.jpg", robo_bytes, "image/jpeg")},
