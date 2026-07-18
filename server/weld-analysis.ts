@@ -49,6 +49,26 @@ async function fetchWithTimeout(
   }
 }
 
+// ── 인터럽트 가능 지연 (clientAbort 발동 시 즉시 해제) ─────────────
+// setTimeout을 AbortSignal로 래핑: 클라이언트가 끊기면 대기를 즉시 해제해 좀비 방지.
+function delayMs(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) { resolve(); return; }
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
+}
+
+// Render 프록시 콜드 스타트 에러 판정 (재시도 대상 여부)
+// 502/503/504 = Render 게이트웨이가 FastAPI 기동 전에 반환하는 상태코드
+// fetch failed / ECONNREFUSED = FastAPI 프로세스 자체가 아직 수신 준비 미완료
+function isColdStartError(e: any): boolean {
+  const s = e?.status as number | undefined;
+  if (s === 502 || s === 503 || s === 504) return true;
+  const msg: string = e?.message ?? "";
+  return msg.includes("fetch failed") || msg.includes("ECONNREFUSED");
+}
+
 // ── FastAPI /analyze-welding 호출 ─────────────────────────────
 async function callFastApiAnalyze(params: {
   frontPhoto:    string;
@@ -209,19 +229,46 @@ export function registerWeldAnalysisRoute(app: Express): void {
           return;
         }
 
-        // Fail-fast: 재시도 없음 — 실패 즉시 클라이언트에 반환
-        // (기존 [0, 5000, 10000] 재시도 루프는 좀비 FastAPI 호출 285s를 유발함)
-        let result: any = null;
-        try {
-          result = await callFastApiAnalyze({ ...callParams, parentSignal: clientAbort.signal });
-        } catch (e: any) {
-          // 클라이언트가 끊긴 후 abort된 경우 — 조용히 종료
+        // Smart Retry: 콜드 스타트(502/503/504/연결실패)에 한해 최대 5회 × 10s 재시도.
+        // Render 무료 티어 콜드 스타트 최대 약 60초 → 10s × 5회 = 50s 커버.
+        // 400·422·AbortError 등 비-콜드스타트 에러는 즉시 상위 catch로 전파(Fail-fast 유지).
+        // 각 대기 전·후에 clientAbort 상태를 확인해 좀비 프로세스를 방지.
+        const COLD_START_RETRIES  = 5;
+        const COLD_START_DELAY_MS = 10_000; // 10s
+
+        let result: any   = null;
+        let lastColdErr: any = null;
+
+        for (let attempt = 0; attempt <= COLD_START_RETRIES; attempt++) {
+          // 대기 후 또는 루프 진입 시 클라이언트 상태 재확인
           if (clientAbort.signal.aborted) {
-            console.warn("[analyze-weld] 클라이언트 끊김으로 인한 abort — 응답 생략");
+            console.warn("[analyze-weld] 클라이언트 끊김 — 재시도 루프 중단");
             return;
           }
-          throw e;
+          try {
+            result = await callFastApiAnalyze({ ...callParams, parentSignal: clientAbort.signal });
+            lastColdErr = null;
+            break; // 성공
+          } catch (e: any) {
+            if (clientAbort.signal.aborted) {
+              console.warn("[analyze-weld] 클라이언트 끊김으로 인한 abort — 응답 생략");
+              return;
+            }
+            if (!isColdStartError(e)) {
+              throw e; // 400·422·AbortError → 즉시 상위 catch로
+            }
+            lastColdErr = e;
+            if (attempt < COLD_START_RETRIES) {
+              console.warn(
+                `[analyze-weld] 콜드 스타트 감지 (HTTP ${e?.status ?? "연결실패"}) — ` +
+                `${attempt + 1}/${COLD_START_RETRIES}회 완료. ${COLD_START_DELAY_MS / 1000}s 후 재시도...`,
+              );
+              await delayMs(COLD_START_DELAY_MS, clientAbort.signal);
+            }
+          }
         }
+
+        if (lastColdErr) throw lastColdErr;
         if (!result) throw new Error("FastAPI 호출 실패 (원인 불명)");
 
         console.log(`[analyze-weld] 성공 | aiScore=${result.aiScore} | 판정=${result.overallVerdict}`);
@@ -261,24 +308,25 @@ export function registerWeldAnalysisRoute(app: Express): void {
         console.error(`[analyze-weld] FastAPI 연산 오류(422): ${detail}`);
         return res.status(500).json({ error: "ANALYSIS_FAILED", message: detail });
       }
-      const isFetchFailed = err.message?.includes("fetch failed") || err.message?.includes("ECONNREFUSED");
-      const isTimeout    = err.message?.includes("AbortError") || err.name === "AbortError";
+      // isColdStart: 502/503/504 또는 ECONNREFUSED/fetch failed — 5회 재시도 후 최종 실패
+      const isColdStart = isColdStartError(err);
+      const isTimeout   = err.message?.includes("AbortError") || err.name === "AbortError";
       console.error(`[analyze-weld] ══ 최종 실패 ══`);
       console.error(`[analyze-weld]  호출 시도 URL : ${FASTAPI_BASE}/analyze-welding`);
       console.error(`[analyze-weld]  오류 메시지   : ${err.message}`);
       console.error(`[analyze-weld]  HTTP 상태     : ${err?.status ?? "N/A"}`);
       console.error(`[analyze-weld]  응답 본문     : ${err?.body?.slice(0, 300) ?? "N/A"}`);
-      if (isFetchFailed) {
-        console.error(`[analyze-weld]  → ECONNREFUSED/fetch failed — FastAPI 서비스가 기동 중인지 확인`);
-        console.error(`[analyze-weld]  → Render 배포 여부: FASTAPI_URL 환경변수 = ${process.env.FASTAPI_URL ?? "(미설정 — 127.0.0.1:8080 폴백)"}`);
+      if (isColdStart) {
+        console.error(`[analyze-weld]  → 콜드 스타트(502/503/504/연결실패) — 5회 × 10s 재시도 후 최종 실패`);
+        console.error(`[analyze-weld]  → FASTAPI_URL = ${process.env.FASTAPI_URL ?? "(미설정 — 127.0.0.1:8080 폴백)"}`);
       }
       if (isTimeout) {
         console.error(`[analyze-weld]  → ${FASTAPI_TIMEOUT_MS / 1000}초 타임아웃 초과 — FastAPI 처리 지연`);
       }
       res.status(503).json({
         error: "AI_ANALYSIS_FAILED",
-        message: isFetchFailed
-          ? "비전 분석 서버에 연결할 수 없습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
+        message: isColdStart
+          ? "AI 분석 서버가 예열 중입니다(최대 1분 소요). 잠시 후 다시 시도해 주세요."
           : isTimeout
           ? "AI 분석 서버 응답 시간이 초과되었습니다. 사진 파일 크기를 줄이거나 잠시 후 다시 시도해주세요."
           : "AI 분석 서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
